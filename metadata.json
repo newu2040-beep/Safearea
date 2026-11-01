@@ -1,0 +1,10 @@
+{
+  "name": "SAFEAREA",
+  "description": "Save, organize, protect, view and retrieve important personal documents from one calm, easy-to-use mobile vault.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
