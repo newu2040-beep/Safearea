@@ -37,12 +37,14 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.EventRepeat
+import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material3.AlertDialog
@@ -73,10 +75,12 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.example.data.AuditEventEntity
 import com.example.data.DocumentWithFields
+import com.example.data.SupportedFileFormatGroup
 import com.example.ui.VaultUiState
 import com.example.ui.components.SafeAreaOutlinedPillButton
 import com.example.ui.components.SafeAreaPrimaryButton
@@ -85,6 +89,7 @@ import com.example.ui.theme.AppearanceMode
 import com.example.ui.theme.LocalSafeAreaPalette
 import com.example.ui.theme.VaultThemeId
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
@@ -106,9 +111,13 @@ fun buildRequiredPermissionsArray(): Array<String> {
 }
 
 /**
- * Built-in Vault Tools Screen implementing Section 12 of the PRD:
- * Document Scanner, Field Copier, Expiry Tracker & Calculator, QR/MRZ Inspector,
- * Storage Manager & Duplicate Detector, and Secure Export.
+ * Built-in Vault Tools Screen operating 100% on real stored vault data:
+ * - Native CameraX Document Scanner
+ * - Multi-Field Copier across stored documents
+ * - Expiry Tracker & Renewal Date Calculator
+ * - Local MRZ / QR String Inspector (no sample/placeholder strings)
+ * - Storage Breakdown by File Format & Duplicate Detector
+ * - Encrypted Vault Backup Export
  */
 @Composable
 fun ToolsScreen(
@@ -124,13 +133,14 @@ fun ToolsScreen(
     var activeToolModal by remember { mutableStateOf<String?>(null) }
 
     val duplicatePairs = remember(documents) {
-        val groupedByTitle = documents.groupBy { it.document.title.trim().lowercase() }
+        documents.groupBy { it.document.title.trim().lowercase() }
             .filter { it.value.size > 1 }
-        groupedByTitle.keys.toList()
+            .keys
+            .toList()
     }
 
     val expiringDocs = remember(documents) {
-        documents.filter { it.document.expiryDate.isNotBlank() }
+        documents.filter { it.document.expiryDate.isNotBlank() && !it.document.archived }
             .sortedBy { it.document.expiryDate }
     }
 
@@ -139,13 +149,13 @@ fun ToolsScreen(
             .fillMaxSize()
             .background(palette.canvas)
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 14.dp),
+            .padding(horizontal = 18.dp, vertical = 14.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .widthIn(max = 540.dp),
+                .widthIn(max = 560.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
@@ -154,7 +164,7 @@ fun ToolsScreen(
                 color = palette.ink
             )
             Text(
-                text = "On-device utilities for scanning, copying fields, tracking expiries, and managing encrypted storage.",
+                text = "Real-time utilities for scanning, copying fields, tracking document expiries, and managing encrypted storage.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = palette.inkMuted
             )
@@ -162,8 +172,8 @@ fun ToolsScreen(
             Spacer(modifier = Modifier.height(4.dp))
 
             ToolActionCard(
-                title = "Document Scanner & Crop",
-                subtitle = "Open CameraX scanner with edge frame, rotate, crop & OCR review",
+                title = "Camera Document Scanner",
+                subtitle = "Capture documents with edge guide, auto-crop, rotation & contrast enhancement",
                 icon = Icons.Default.CameraAlt,
                 badge = "CameraX",
                 onClick = onOpenScanner
@@ -171,45 +181,45 @@ fun ToolsScreen(
 
             ToolActionCard(
                 title = "Multi-Field Copier",
-                subtitle = "Select specific fields across your documents & copy with 30s auto-clear",
+                subtitle = "Select and copy fields across your stored documents with 30s clipboard auto-clear",
                 icon = Icons.Default.ContentCopy,
                 badge = "${documents.sumOf { it.fields.size }} fields",
                 onClick = { activeToolModal = "FIELD_COPIER" }
             )
 
             ToolActionCard(
-                title = "Expiry Tracker & Calculator",
-                subtitle = "View expiring IDs/passports and calculate renewal reminder dates",
+                title = "Expiry Tracker & Renewal Calculator",
+                subtitle = "Monitor expiring documents and calculate renewal reminder dates",
                 icon = Icons.Default.EventRepeat,
                 badge = "${expiringDocs.size} tracked",
                 onClick = { activeToolModal = "EXPIRY_TRACKER" }
             )
 
             ToolActionCard(
-                title = "OCR & MRZ / QR Inspector",
-                subtitle = "Parse machine-readable ID zones or QR text locally without network upload",
+                title = "MRZ & QR Payload Inspector",
+                subtitle = "Parse machine-readable ID zones or QR text locally on-device",
                 icon = Icons.Default.QrCodeScanner,
                 badge = "Local",
                 onClick = { activeToolModal = "QR_INSPECTOR" }
             )
 
             ToolActionCard(
-                title = "Storage Manager & Duplicate Check",
-                subtitle = "Vault: ${formatBytes(uiState.vaultStorageBytes)} · Cache: ${formatBytes(uiState.cacheStorageBytes)} · ${duplicatePairs.size} duplicate group(s)",
+                title = "Storage & Format Analyzer",
+                subtitle = "Vault: ${formatBytes(uiState.vaultStorageBytes)} · Cache: ${formatBytes(uiState.cacheStorageBytes)} · ${duplicatePairs.size} duplicate(s)",
                 icon = Icons.Default.Storage,
                 badge = "${documents.size} docs",
                 onClick = { activeToolModal = "STORAGE_MANAGER" }
             )
 
             ToolActionCard(
-                title = "Secure Backup & Export",
-                subtitle = "Export a user-controlled vault metadata archive with privacy warning",
+                title = "Export Vault Backup",
+                subtitle = "Export a structured JSON archive of your vault metadata",
                 icon = Icons.Default.Backup,
                 badge = "JSON",
                 onClick = onExportBackup
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(24.dp))
         }
     }
 
@@ -223,40 +233,50 @@ fun ToolsScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(340.dp)
+                        .height(320.dp)
                         .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text(
-                        text = "Select the exact fields you want to copy together. Clipboard auto-clears after 30 seconds.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = palette.inkMuted
-                    )
-                    documents.forEach { docWithFields ->
+                    if (documents.isEmpty()) {
                         Text(
-                            text = docWithFields.document.title,
-                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                            color = palette.primary,
-                            modifier = Modifier.padding(top = 6.dp)
+                            text = "No documents stored yet. Add or scan a document first to copy its fields.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = palette.inkMuted
                         )
-                        docWithFields.fields.forEach { field ->
-                            val key = "${docWithFields.document.title} - ${field.label}: ${field.value}"
-                            val checked = selectedFieldKeys[key] == true
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { selectedFieldKeys[key] = !checked }
-                            ) {
-                                Checkbox(
-                                    checked = checked,
-                                    onCheckedChange = { selectedFieldKeys[key] = it }
-                                )
+                    } else {
+                        Text(
+                            text = "Select fields to copy together. Clipboard auto-clears after 30 seconds.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = palette.inkMuted
+                        )
+                        documents.forEach { docWithFields ->
+                            if (docWithFields.fields.isNotEmpty()) {
                                 Text(
-                                    text = "${field.label}: ${field.value}",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = palette.ink
+                                    text = docWithFields.document.title,
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = palette.primary,
+                                    modifier = Modifier.padding(top = 6.dp)
                                 )
+                                docWithFields.fields.forEach { field ->
+                                    val key = "${docWithFields.document.title} - ${field.label}: ${field.value}"
+                                    val checked = selectedFieldKeys[key] == true
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { selectedFieldKeys[key] = !checked }
+                                    ) {
+                                        Checkbox(
+                                            checked = checked,
+                                            onCheckedChange = { selectedFieldKeys[key] = it }
+                                        )
+                                        Text(
+                                            text = "${field.label}: ${field.value}",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = palette.ink
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -287,10 +307,11 @@ fun ToolsScreen(
     }
 
     if (activeToolModal == "EXPIRY_TRACKER") {
-        var issueYearInput by remember { mutableStateOf("2024") }
+        val currentYear = remember { Calendar.getInstance().get(Calendar.YEAR).toString() }
+        var issueYearInput by remember { mutableStateOf(currentYear) }
         var validityYearsInput by remember { mutableIntStateOf(5) }
         val calculatedExpiry = remember(issueYearInput, validityYearsInput) {
-            val baseYear = issueYearInput.toIntOrNull() ?: 2024
+            val baseYear = issueYearInput.toIntOrNull() ?: Calendar.getInstance().get(Calendar.YEAR)
             "${baseYear + validityYearsInput}-01-01 (Reminder: ${baseYear + validityYearsInput - 1}-12-01)"
         }
 
@@ -311,13 +332,17 @@ fun ToolsScreen(
                         color = palette.ink
                     )
                     if (expiringDocs.isEmpty()) {
-                        Text("No documents have an expiry date set.", style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            text = "No stored documents currently have an expiry date set.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = palette.inkMuted
+                        )
                     } else {
                         expiringDocs.forEach { item ->
                             val d = daysUntilExpiry(item.document.expiryDate) ?: 0L
                             Surface(
                                 shape = RoundedCornerShape(10.dp),
-                                color = if (d <= 45) palette.warningContainer else palette.successContainer,
+                                color = if (d <= 45L) palette.warningContainer else palette.successContainer,
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable {
@@ -332,7 +357,8 @@ fun ToolsScreen(
                                     Text(
                                         text = item.document.title,
                                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = palette.ink
+                                        color = palette.ink,
+                                        modifier = Modifier.weight(1f)
                                     )
                                     Text(
                                         text = "${item.document.expiryDate} (${if (d < 0) "Expired" else "${d}d left"})",
@@ -346,7 +372,7 @@ fun ToolsScreen(
 
                     HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                     Text(
-                        text = "Quick Validity Calculator",
+                        text = "Validity Calculator",
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                         color = palette.ink
                     )
@@ -367,7 +393,7 @@ fun ToolsScreen(
                         }
                     }
                     Text(
-                        text = "Estimated Renewal: $calculatedExpiry",
+                        text = "Calculated Expiry: $calculatedExpiry",
                         style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
                         color = palette.primary
                     )
@@ -382,47 +408,51 @@ fun ToolsScreen(
     }
 
     if (activeToolModal == "QR_INSPECTOR") {
-        var rawCodePayload by remember { mutableStateOf("IDNPL1234567890<<9805218M3301095NPL<<<<<<04\nSHAH<<RAHUL<<<<<<<<<<<<<<<<<<<<<<<<<<<<") }
+        var rawCodePayload by remember { mutableStateOf("") }
         AlertDialog(
             onDismissRequest = { activeToolModal = null },
             containerColor = palette.surface,
-            title = { Text("QR / MRZ Code Inspector") },
+            title = { Text("MRZ / QR Payload Inspector") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = "Inspect decoded QR/barcode or Passport/ID Machine Readable Zone (MRZ) strings locally. Note: Decoded content is never assumed authentic or government-verified.",
+                        text = "Paste any passport/ID Machine Readable Zone (MRZ) or QR payload string to inspect its structure locally on your device.",
                         style = MaterialTheme.typography.bodySmall,
                         color = palette.inkMuted
                     )
                     OutlinedTextField(
                         value = rawCodePayload,
                         onValueChange = { rawCodePayload = it },
-                        label = { Text("Decoded QR / MRZ Payload") },
+                        placeholder = { Text("Paste MRZ or QR string here...") },
+                        label = { Text("MRZ / QR String") },
                         modifier = Modifier.fillMaxWidth()
                     )
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = palette.canvas
-                    ) {
-                        Column(modifier = Modifier.padding(10.dp)) {
-                            Text(
-                                text = "Parsed Local Summary:",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = palette.ink
-                            )
-                            Text(
-                                text = "Length: ${rawCodePayload.length} chars · Contains MRZ chevrons: ${if (rawCodePayload.contains("<<")) "Yes" else "No"}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = palette.inkMuted
-                            )
+                    if (rawCodePayload.isNotBlank()) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = palette.canvas
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text(
+                                    text = "Local Inspection Summary:",
+                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                                    color = palette.ink
+                                )
+                                Text(
+                                    text = "Length: ${rawCodePayload.length} chars · Lines: ${rawCodePayload.lines().size} · MRZ format: ${if (rawCodePayload.contains("<<")) "Detected" else "Standard text"}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = palette.inkMuted
+                                )
+                            }
                         }
                     }
                 }
             },
             confirmButton = {
                 TextButton(
+                    enabled = rawCodePayload.isNotBlank(),
                     onClick = {
-                        onCopyCustomSelection("QR/MRZ Payload", rawCodePayload)
+                        onCopyCustomSelection("MRZ/QR Payload", rawCodePayload)
                         activeToolModal = null
                     }
                 ) {
@@ -438,31 +468,41 @@ fun ToolsScreen(
     }
 
     if (activeToolModal == "STORAGE_MANAGER") {
-        val pdfCount = documents.count { it.document.mimeType.contains("pdf", ignoreCase = true) }
-        val imageCount = documents.size - pdfCount
+        val formatCounts = remember(documents) {
+            SupportedFileFormatGroup.entries.filter { it != SupportedFileFormatGroup.ALL }.associateWith { grp ->
+                documents.count { it.document.formatGroup == grp }
+            }
+        }
         AlertDialog(
             onDismissRequest = { activeToolModal = null },
             containerColor = palette.surface,
-            title = { Text("Storage Manager") },
+            title = { Text("Storage & Format Analyzer") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("• Encrypted Vault Files: ${formatBytes(uiState.vaultStorageBytes)}")
+                    Text("• Encrypted Vault Storage: ${formatBytes(uiState.vaultStorageBytes)}")
                     Text("• Temporary Export Cache: ${formatBytes(uiState.cacheStorageBytes)}")
-                    Text("• Breakdown: $imageCount ID/Image record(s), $pdfCount PDF document(s)")
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                    Text(
+                        text = "Stored Documents by Format (${documents.size} total):",
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                        color = palette.ink
+                    )
+                    formatCounts.forEach { (grp, count) ->
+                        Text(
+                            text = "• ${grp.label}: $count document(s)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = palette.inkMuted
+                        )
+                    }
                     Text(
                         text = if (duplicatePairs.isEmpty()) {
-                            "• Duplicate Check: No duplicate document titles detected."
+                            "• Duplicate Check: No duplicate document titles found."
                         } else {
-                            "• Duplicate Candidates Found: ${duplicatePairs.joinToString(", ")}"
+                            "• Duplicate Titles Found: ${duplicatePairs.joinToString(", ")}"
                         },
                         color = if (duplicatePairs.isEmpty()) palette.success else Color(0xFF8A5A00),
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Clearing cache removes temporary shared copies without touching your original encrypted documents.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = palette.inkMuted
+                        fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.bodySmall
                     )
                 }
             },
@@ -501,7 +541,7 @@ private fun ToolActionCard(
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(18.dp),
         color = palette.surface,
-        border = BorderStroke(1.2.dp, palette.border.copy(alpha = 0.35f))
+        border = BorderStroke(1.1.dp, palette.border.copy(alpha = 0.32f))
     ) {
         Row(
             modifier = Modifier.padding(16.dp),
@@ -526,15 +566,17 @@ private fun ToolActionCard(
                     Text(
                         text = title,
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = palette.ink
+                        color = palette.ink,
+                        modifier = Modifier.weight(1f)
                     )
+                    Spacer(modifier = Modifier.width(8.dp))
                     Surface(
                         shape = RoundedCornerShape(8.dp),
                         color = palette.successContainer
                     ) {
                         Text(
                             text = badge,
-                            style = MaterialTheme.typography.labelMedium,
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                             color = palette.onSuccessContainer,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                         )
@@ -552,11 +594,12 @@ private fun ToolActionCard(
 }
 
 /**
- * Profile & Settings Screen implementing:
- * - Appearance: Light / Dark / System toggle + 10 Pastel & Dark Theme Picker
- * - Typography & Font Options: Use System Font option + Font Size / Scale selector
- * - Permissions & Full Access: Request All Permissions (Camera, Notifications, Gallery/Media) + Grant Full Folder/Files Access
- * - Security, Lock, Storage, Backup & Delete All Data
+ * Responsive Profile & Vault Settings Screen:
+ * - Zero text clipping on any screen size or font scale
+ * - Native Android BiometricPrompt authentication toggle & verification
+ * - Permissions, Gallery, Folder Access & Expiry Notifications
+ * - Typography & Font Options (Editorial Font vs System Font + Responsive Text Scaling)
+ * - 10 Pastel & Dark Theme Presets
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -586,14 +629,12 @@ fun ProfileSettingsScreen(
     var showWipeConfirmDialog by remember { mutableStateOf(false) }
     var showAuditLogDialog by remember { mutableStateOf(false) }
 
-    // Multi-permission launcher for Camera, Notifications, and Gallery/Media/Storage
     val requestAllPermissionsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { resultMap ->
         onPermissionsUpdated(resultMap)
     }
 
-    // Full Folder / Files Access via Storage Access Framework OpenDocumentTree
     val folderTreeLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
     ) { treeUri: Uri? ->
@@ -648,13 +689,13 @@ fun ProfileSettingsScreen(
             .fillMaxSize()
             .background(palette.canvas)
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 14.dp),
+            .padding(horizontal = 18.dp, vertical = 14.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .widthIn(max = 540.dp),
+                .widthIn(max = 560.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Text(
@@ -663,11 +704,11 @@ fun ProfileSettingsScreen(
                 color = palette.ink
             )
 
-            // 1. Permissions, Gallery, Files & Notifications Full Access Card
+            // 1. Permissions, Gallery & Files Access Card (Responsive buttons with zero clipping)
             Surface(
                 shape = RoundedCornerShape(20.dp),
                 color = palette.surface,
-                border = BorderStroke(1.2.dp, palette.border.copy(alpha = 0.35f)),
+                border = BorderStroke(1.1.dp, palette.border.copy(alpha = 0.32f)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(18.dp)) {
@@ -689,13 +730,13 @@ fun ProfileSettingsScreen(
                     PermissionStatusRow(
                         "Files & Folder Access",
                         uiState.grantedFolderUri.isNotBlank(),
-                        customStatus = if (uiState.grantedFolderUri.isNotBlank()) "Full Directory Granted" else "Tap below to grant folder"
+                        customStatus = if (uiState.grantedFolderUri.isNotBlank()) "Folder Granted" else "Optional"
                     )
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
 
                     SafeAreaPrimaryButton(
-                        text = "Grant All Permissions (Camera, Notifs & Gallery)",
+                        text = "Grant All Permissions",
                         leadingIcon = Icons.Default.CheckCircle,
                         onClick = {
                             requestAllPermissionsLauncher.launch(buildRequiredPermissionsArray())
@@ -705,9 +746,12 @@ fun ProfileSettingsScreen(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
                         SafeAreaOutlinedPillButton(
-                            text = "Full Files / Folder",
+                            text = "Folder Access",
                             leadingIcon = Icons.Default.FolderOpen,
                             onClick = { folderTreeLauncher.launch(null) },
                             modifier = Modifier
@@ -716,6 +760,7 @@ fun ProfileSettingsScreen(
                         )
                         SafeAreaOutlinedPillButton(
                             text = "App Settings",
+                            leadingIcon = Icons.Default.Settings,
                             onClick = {
                                 runCatching {
                                     val intent = Intent(
@@ -729,7 +774,7 @@ fun ProfileSettingsScreen(
                         )
                     }
 
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp))
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -755,11 +800,116 @@ fun ProfileSettingsScreen(
                 }
             }
 
-            // 2. Typography & Font Options ("Use System Font" + Font Size Scale)
+            // 2. Native Biometric & Vault Lock Security Card
             Surface(
                 shape = RoundedCornerShape(20.dp),
                 color = palette.surface,
-                border = BorderStroke(1.2.dp, palette.border.copy(alpha = 0.35f)),
+                border = BorderStroke(1.1.dp, palette.border.copy(alpha = 0.32f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(18.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Security, contentDescription = null, tint = palette.primary)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Biometric & Vault Lock Security",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = palette.ink
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Enable Vault App Lock",
+                                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                                color = palette.ink
+                            )
+                            Text(
+                                text = "Method: ${uiState.primaryLockMethod.title}${if (uiState.biometricEnabled) " + Biometrics" else ""}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = palette.inkMuted
+                            )
+                        }
+                        Switch(
+                            checked = uiState.appLockEnabled,
+                            onCheckedChange = onToggleAppLock,
+                            colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = palette.primary)
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Auto-Lock When Leaving App", style = MaterialTheme.typography.bodyMedium, color = palette.ink)
+                            Text("Require authentication when returning", style = MaterialTheme.typography.bodySmall, color = palette.inkMuted)
+                        }
+                        Switch(
+                            checked = uiState.lockOnBackground,
+                            onCheckedChange = onToggleLockOnBackground,
+                            colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = palette.primary)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Inactivity Auto-Lock Timeout",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = palette.inkMuted
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf(15 to "15 sec", 60 to "1 min", 300 to "5 min", 900 to "15 min").forEach { (sec, label) ->
+                            FilterChip(
+                                selected = uiState.autoLockTimeoutSeconds == sec,
+                                onClick = { onChangeAutoLockTimeout(sec) },
+                                label = { Text(label) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = palette.primary,
+                                    selectedLabelColor = Color.White
+                                )
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        SafeAreaOutlinedPillButton(
+                            text = "Configure Lock",
+                            leadingIcon = Icons.Default.Fingerprint,
+                            onClick = onConfigureLockMethod,
+                            modifier = Modifier.weight(1f)
+                        )
+                        SafeAreaPrimaryButton(
+                            text = "Lock Now",
+                            leadingIcon = Icons.Default.Lock,
+                            onClick = onLockVaultNow,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
+
+            // 3. Typography & Font Options
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = palette.surface,
+                border = BorderStroke(1.1.dp, palette.border.copy(alpha = 0.32f)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(18.dp)) {
@@ -790,7 +940,7 @@ fun ProfileSettingsScreen(
                                 text = if (uiState.useSystemFont) {
                                     "Using Android device system font"
                                 } else {
-                                    "Using SAFEAREA editorial font (Plus Jakarta Sans + Devanagari)"
+                                    "Using SAFEAREA editorial font (Plus Jakarta Sans)"
                                 },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = palette.inkMuted
@@ -809,7 +959,6 @@ fun ProfileSettingsScreen(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // Segmented Font Family selector
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -834,7 +983,7 @@ fun ProfileSettingsScreen(
                             ) {
                                 Text(
                                     text = label,
-                                    style = MaterialTheme.typography.labelLarge,
+                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
                                     color = if (selected) Color.White else palette.ink
                                 )
                             }
@@ -844,17 +993,20 @@ fun ProfileSettingsScreen(
                     Spacer(modifier = Modifier.height(12.dp))
 
                     Text(
-                        text = "Text Size & Scaling",
+                        text = "Text Size & Display Scaling",
                         style = MaterialTheme.typography.labelLarge,
                         color = palette.inkMuted
                     )
                     Spacer(modifier = Modifier.height(6.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
                         listOf(
                             0.90f to "Small",
                             1.00f to "Default",
                             1.12f to "Large",
-                            1.22f to "XL"
+                            1.22f to "Extra Large"
                         ).forEach { (scaleVal, label) ->
                             val selected = kotlin.math.abs(uiState.fontScale - scaleVal) < 0.04f
                             FilterChip(
@@ -871,11 +1023,11 @@ fun ProfileSettingsScreen(
                 }
             }
 
-            // 3. Appearance & Coordinated Pastel Theme Picker (Section 3 of PRD)
+            // 4. Appearance & Theme Library
             Surface(
                 shape = RoundedCornerShape(20.dp),
                 color = palette.surface,
-                border = BorderStroke(1.2.dp, palette.border.copy(alpha = 0.35f)),
+                border = BorderStroke(1.1.dp, palette.border.copy(alpha = 0.32f)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(18.dp)) {
@@ -891,12 +1043,6 @@ fun ProfileSettingsScreen(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    Text(
-                        text = "Display Mode",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = palette.inkMuted
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -919,7 +1065,7 @@ fun ProfileSettingsScreen(
                             ) {
                                 Text(
                                     text = mode.label,
-                                    style = MaterialTheme.typography.labelLarge,
+                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
                                     color = if (selected) Color.White else palette.ink
                                 )
                             }
@@ -927,13 +1073,6 @@ fun ProfileSettingsScreen(
                     }
 
                     Spacer(modifier = Modifier.height(14.dp))
-
-                    Text(
-                        text = "Pastel & Dark Theme Presets (10 Themes)",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = palette.inkMuted
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
 
                     FlowRow(
                         modifier = Modifier.fillMaxWidth(),
@@ -962,14 +1101,14 @@ fun ProfileSettingsScreen(
                                 ) {
                                     Box(
                                         modifier = Modifier
-                                            .size(18.dp)
+                                            .size(16.dp)
                                             .clip(CircleShape)
                                             .background(Color(theme.primaryHex))
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Box(
                                         modifier = Modifier
-                                            .size(14.dp)
+                                            .size(12.dp)
                                             .clip(CircleShape)
                                             .background(Color(theme.secondaryHex))
                                     )
@@ -980,6 +1119,8 @@ fun ProfileSettingsScreen(
                                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                                         ),
                                         color = Color(theme.inkHex),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
                                         modifier = Modifier.weight(1f)
                                     )
                                     if (isSelected) {
@@ -997,105 +1138,11 @@ fun ProfileSettingsScreen(
                 }
             }
 
-            // 4. Security & App Lock Settings
+            // 5. Data Location & Privacy Controls
             Surface(
                 shape = RoundedCornerShape(20.dp),
                 color = palette.surface,
-                border = BorderStroke(1.2.dp, palette.border.copy(alpha = 0.35f)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(18.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Security, contentDescription = null, tint = palette.primary)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Security & Vault Lock",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = palette.ink
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Enable App Lock", style = MaterialTheme.typography.bodyLarge, color = palette.ink)
-                            Text(
-                                "Current method: ${uiState.primaryLockMethod.title}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = palette.inkMuted
-                            )
-                        }
-                        Switch(
-                            checked = uiState.appLockEnabled,
-                            onCheckedChange = onToggleAppLock,
-                            colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = palette.primary)
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Auto-Lock When Backgrounded", style = MaterialTheme.typography.bodyMedium, color = palette.ink)
-                            Text("Lock immediately when switching apps", style = MaterialTheme.typography.bodySmall, color = palette.inkMuted)
-                        }
-                        Switch(
-                            checked = uiState.lockOnBackground,
-                            onCheckedChange = onToggleLockOnBackground,
-                            colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = palette.primary)
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Inactivity Auto-Lock Timer",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = palette.inkMuted
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf(15 to "15s", 60 to "1m", 300 to "5m", 900 to "15m").forEach { (sec, label) ->
-                            FilterChip(
-                                selected = uiState.autoLockTimeoutSeconds == sec,
-                                onClick = { onChangeAutoLockTimeout(sec) },
-                                label = { Text(label) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = palette.primary,
-                                    selectedLabelColor = Color.White
-                                )
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        SafeAreaOutlinedPillButton(
-                            text = "Change Lock / PIN",
-                            onClick = onConfigureLockMethod,
-                            modifier = Modifier.weight(1f)
-                        )
-                        SafeAreaPrimaryButton(
-                            text = "Lock Vault",
-                            leadingIcon = Icons.Default.Lock,
-                            onClick = onLockVaultNow,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                }
-            }
-
-            // 5. Privacy, Storage & Destructive Data Controls
-            Surface(
-                shape = RoundedCornerShape(20.dp),
-                color = palette.surface,
-                border = BorderStroke(1.2.dp, palette.border.copy(alpha = 0.35f)),
+                border = BorderStroke(1.1.dp, palette.border.copy(alpha = 0.32f)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
@@ -1113,7 +1160,10 @@ fun ProfileSettingsScreen(
                         color = palette.inkMuted
                     )
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
                         SafeAreaOutlinedPillButton(
                             text = "Export Backup",
                             onClick = onExportBackup,
@@ -1144,13 +1194,13 @@ fun ProfileSettingsScreen(
             }
 
             Text(
-                text = "SAFEAREA v1.0 · Personal Document Vault · On-Device Only",
+                text = "SAFEAREA · Personal Document Vault · On-Device Encrypted",
                 style = MaterialTheme.typography.bodySmall,
                 color = palette.inkMuted,
                 modifier = Modifier.align(Alignment.CenterHorizontally)
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(28.dp))
         }
     }
 
@@ -1197,7 +1247,7 @@ fun ProfileSettingsScreen(
             title = { Text("Delete All Local Vault Data?") },
             text = {
                 Text(
-                    "This action will permanently delete all stored documents, encrypted scans, PDFs, structured fields, and PIN/Pattern credentials from this device. This cannot be undone."
+                    "This action will permanently delete all stored documents, encrypted files, structured fields, and PIN/Pattern credentials from this device."
                 )
             },
             confirmButton = {
@@ -1236,8 +1286,10 @@ private fun PermissionStatusRow(
         Text(
             text = label,
             style = MaterialTheme.typography.bodyMedium,
-            color = palette.ink
+            color = palette.ink,
+            modifier = Modifier.weight(1f)
         )
+        Spacer(modifier = Modifier.width(8.dp))
         Surface(
             shape = RoundedCornerShape(8.dp),
             color = if (isGranted) palette.successContainer else palette.warningContainer

@@ -27,6 +27,9 @@ interface VaultDao {
     @Query("DELETE FROM documents WHERE id = :docId")
     suspend fun deleteDocumentById(docId: Long)
 
+    @Query("DELETE FROM documents WHERE isSamplePlaceholder = 1")
+    suspend fun deleteSamplePlaceholderDocuments()
+
     @Query("DELETE FROM documents")
     suspend fun deleteAllDocuments()
 

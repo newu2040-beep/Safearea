@@ -3,6 +3,8 @@ package com.example
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.CryptoStorageManager
+import com.example.data.DocumentCategoryGroup
+import com.example.data.SupportedFileFormatGroup
 import com.example.ui.daysUntilExpiry
 import com.example.ui.theme.AppearanceMode
 import com.example.ui.theme.VaultThemeId
@@ -70,5 +72,37 @@ class ExampleRobolectricTest {
         val days = daysUntilExpiry("2099-12-31")
         assertNotNull(days)
         assertTrue((days ?: 0L) > 365L)
+    }
+
+    @Test
+    fun `all 9 document categories and universal file format groups are supported`() {
+        assertEquals(9, DocumentCategoryGroup.entries.size)
+        val totalSubtypes = DocumentCategoryGroup.entries.sumOf { it.subtypes.size }
+        assertTrue(totalSubtypes >= 60)
+
+        assertEquals(
+            SupportedFileFormatGroup.PDF,
+            SupportedFileFormatGroup.detectGroup("pdf", "application/pdf")
+        )
+        assertEquals(
+            SupportedFileFormatGroup.WORD,
+            SupportedFileFormatGroup.detectGroup("docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        )
+        assertEquals(
+            SupportedFileFormatGroup.SPREADSHEET,
+            SupportedFileFormatGroup.detectGroup("xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        )
+        assertEquals(
+            SupportedFileFormatGroup.PRESENTATION,
+            SupportedFileFormatGroup.detectGroup("pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation")
+        )
+        assertEquals(
+            SupportedFileFormatGroup.IMAGE,
+            SupportedFileFormatGroup.detectGroup("heic", "image/heic")
+        )
+        assertEquals(
+            SupportedFileFormatGroup.TEXT_DATA,
+            SupportedFileFormatGroup.detectGroup("json", "application/json")
+        )
     }
 }

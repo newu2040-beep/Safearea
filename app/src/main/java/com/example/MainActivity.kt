@@ -46,6 +46,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.data.DocumentCategoryGroup
 import com.example.data.DocumentEntity
 import com.example.ui.SafeAreaScreen
 import com.example.ui.VaultViewModel
@@ -87,7 +88,6 @@ fun SafeAreaApp(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    // Prompt for Camera, Notifications, and Gallery/Media permissions on launch
     val startupPermissionsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { resultMap ->
@@ -100,7 +100,6 @@ fun SafeAreaApp(
         }
     }
 
-    // Observe lifecycle for live date/time updates on resume and auto-lock on background
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
@@ -116,9 +115,10 @@ fun SafeAreaApp(
     }
 
     BackHandler(
-        enabled = uiState.currentScreen != SafeAreaScreen.HOME &&
-            uiState.currentScreen != SafeAreaScreen.WELCOME &&
-            uiState.currentScreen != SafeAreaScreen.UNLOCK
+        enabled = uiState.isBulkSelectionActive ||
+            (uiState.currentScreen != SafeAreaScreen.HOME &&
+                uiState.currentScreen != SafeAreaScreen.WELCOME &&
+                uiState.currentScreen != SafeAreaScreen.UNLOCK)
     ) {
         viewModel.navigateBack()
     }
@@ -213,7 +213,14 @@ fun SafeAreaApp(
                             uiState = uiState,
                             documents = documents,
                             onOpenDocument = { docId -> viewModel.openDocumentDetails(docId) },
-                            onSeeAllDocuments = { viewModel.navigateTo(SafeAreaScreen.DOCUMENTS) },
+                            onSeeAllDocuments = {
+                                viewModel.selectCategoryFilter("All")
+                                viewModel.navigateTo(SafeAreaScreen.DOCUMENTS)
+                            },
+                            onOpenCategory = { categoryTitle ->
+                                viewModel.selectCategoryFilter(categoryTitle)
+                                viewModel.navigateTo(SafeAreaScreen.DOCUMENTS)
+                            },
                             onAddDocument = { viewModel.navigateTo(SafeAreaScreen.ADD_DOCUMENT) },
                             onQuickScan = { viewModel.navigateTo(SafeAreaScreen.CAMERA_SCANNER) },
                             onOpenSettings = { viewModel.navigateTo(SafeAreaScreen.PROFILE) },
@@ -228,11 +235,19 @@ fun SafeAreaApp(
                             documents = documents,
                             onSearchQueryChange = { viewModel.updateSearchQuery(it) },
                             onSelectCategory = { viewModel.selectCategoryFilter(it) },
+                            onSelectFormatGroup = { viewModel.selectFormatGroupFilter(it) },
+                            onSelectExpiryFilter = { viewModel.selectExpiryFilter(it) },
                             onToggleFavourites = { viewModel.toggleFavouritesFilter() },
-                            onToggleExpiring = { viewModel.toggleExpiringFilter() },
+                            onToggleRecentlyOpened = { viewModel.toggleRecentlyOpenedFilter() },
                             onToggleArchived = { viewModel.toggleArchivedFilter() },
                             onSortChange = { viewModel.setSortOption(it) },
                             onToggleGridView = { viewModel.toggleGridView() },
+                            onToggleBulkSelection = { viewModel.toggleBulkDocumentSelection(it) },
+                            onSelectAllVisible = { viewModel.selectAllVisibleDocuments(it) },
+                            onClearBulkSelection = { viewModel.clearBulkSelection() },
+                            onBulkDeleteSelected = { viewModel.bulkDeleteSelectedDocuments() },
+                            onBulkArchiveSelected = { viewModel.bulkArchiveSelectedDocuments(it) },
+                            onBulkMoveCategorySelected = { viewModel.bulkMoveCategorySelectedDocuments(it) },
                             onAddCustomCategory = { viewModel.addCustomCategory(it) },
                             onOpenDocument = { viewModel.openDocumentDetails(it) },
                             onAddDocument = { viewModel.navigateTo(SafeAreaScreen.ADD_DOCUMENT) }
@@ -244,9 +259,14 @@ fun SafeAreaApp(
                             ?: documents.firstOrNull()
                         DocumentDetailScreen(
                             docWithFields = selectedDoc,
+                            allCategories = uiState.allCategories,
                             cryptoStorage = viewModel.cryptoStorage,
+                            repository = viewModel.repository,
                             onBack = { viewModel.navigateBack() },
                             onEditDocument = { viewModel.startEditingExistingDocument(it) },
+                            onRenameDocument = { doc, newTitle -> viewModel.renameDocument(doc, newTitle) },
+                            onDuplicateDocument = { viewModel.duplicateDocument(it) },
+                            onMoveCategory = { doc, newCat -> viewModel.moveDocumentCategory(doc, newCat) },
                             onToggleFavourite = { viewModel.toggleFavourite(it) },
                             onToggleArchive = { viewModel.toggleArchive(it) },
                             onRotateAttachment = { doc, isBack -> viewModel.rotateDocumentAttachment(doc, isBack) },
@@ -254,6 +274,7 @@ fun SafeAreaApp(
                             onConfirmOcrFields = { viewModel.confirmOcrFieldsForCurrentDocument(it) },
                             onCopySingleField = { label, value -> viewModel.copyTextToClipboard(label, value) },
                             onCopyAllFields = { viewModel.copyAllDocumentInfo(it) },
+                            onOpenExternalViewer = { doc -> viewModel.openDocumentInExternalViewer(context, doc) },
                             onShareDocument = { docWithFields, includeFile ->
                                 viewModel.shareDocumentSummaryOrFile(context, docWithFields, includeFile)
                             }
@@ -265,7 +286,9 @@ fun SafeAreaApp(
                             onBack = { viewModel.navigateBack() },
                             onOpenCameraScanner = { viewModel.navigateTo(SafeAreaScreen.CAMERA_SCANNER) },
                             onImportUri = { uri -> viewModel.importDocumentFromUri(uri) },
-                            onEnterManually = { viewModel.startManualAddDocument() }
+                            onEnterManually = { presetCat, presetSub ->
+                                viewModel.startManualAddDocument(presetCat, presetSub)
+                            }
                         )
                     }
 
@@ -277,9 +300,11 @@ fun SafeAreaApp(
                                     PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                                 )
                             },
-                            onFallbackManualEntry = { viewModel.startManualAddDocument() },
-                            onScanCompleted = { front, back, titleHint, catHint, ocrText ->
-                                viewModel.onCameraScanCaptured(front, back, titleHint, catHint, ocrText)
+                            onFallbackManualEntry = {
+                                viewModel.startManualAddDocument()
+                            },
+                            onScanCompleted = { front, back, titleHint, catHint, subtypeHint, ocrText ->
+                                viewModel.onCameraScanCaptured(front, back, titleHint, catHint, subtypeHint, ocrText)
                             }
                         )
                     }
@@ -287,9 +312,10 @@ fun SafeAreaApp(
                     SafeAreaScreen.DOCUMENT_EDITOR -> {
                         val draftDoc = uiState.editingDocument ?: DocumentEntity(
                             title = "",
-                            category = "Identity",
+                            category = DocumentCategoryGroup.PERSONAL.title,
+                            documentSubtype = DocumentCategoryGroup.PERSONAL.subtypes.first(),
                             issuer = "",
-                            country = "Nepal"
+                            country = ""
                         )
                         DocumentEditorScreen(
                             initialDocument = draftDoc,
@@ -344,13 +370,13 @@ fun SafeAreaApp(
                     }
                 }
 
-                // Visible Status / Clipboard Privacy Auto-Clear Banner
+                // Auto-dismissing Status / Clipboard Privacy Auto-Clear Banner
                 val bannerMsg = uiState.statusBannerMessage
                 AnimatedVisibility(
                     visible = !bannerMsg.isNullOrBlank(),
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
-                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                        .padding(horizontal = 16.dp, vertical = 10.dp)
                 ) {
                     Surface(
                         shape = RoundedCornerShape(16.dp),

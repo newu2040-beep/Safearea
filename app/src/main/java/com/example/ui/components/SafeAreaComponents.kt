@@ -2,43 +2,48 @@ package com.example.ui.components
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Badge
-import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckBox
+import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.FlightTakeoff
+import androidx.compose.material.icons.filled.Gavel
 import androidx.compose.material.icons.filled.GridView
-import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.HealthAndSafety
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.PersonOutline
 import androidx.compose.material.icons.filled.School
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.WorkOutline
-import androidx.compose.material.icons.outlined.AccountBalance
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Home
@@ -65,13 +70,15 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.data.DocumentIconType
+import com.example.data.DocumentCategoryGroup
 import com.example.ui.SafeAreaScreen
 import com.example.ui.theme.LocalSafeAreaPalette
+import java.util.Locale
 
 /**
  * Custom Canvas reproduction of the SAFEAREA Shield + Lock Mark with soft green bottom-right swoosh.
@@ -86,7 +93,7 @@ fun SafeAreaShieldLogo(
         val w = this.size.width
         val h = this.size.height
 
-        // Green accent ribbon curve underneath bottom-right of shield (from mockup)
+        // Green accent ribbon curve underneath bottom-right of shield
         val greenPath = Path().apply {
             moveTo(w * 0.44f, h * 0.90f)
             cubicTo(
@@ -164,8 +171,7 @@ fun SafeAreaShieldLogo(
 }
 
 /**
- * Custom vector illustration reproducing Screen 1 of the SAFEAREA mockup:
- * Tilted DRIVING LICENSE card, NATIONAL ID card, and dark navy PASSPORT booklet with green sparkles.
+ * Custom vector illustration for Welcome / Onboarding screen.
  */
 @Composable
 fun WelcomeDocumentsHeroIllustration(
@@ -175,21 +181,19 @@ fun WelcomeDocumentsHeroIllustration(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(210.dp),
+            .height(190.dp),
         contentAlignment = Alignment.Center
     ) {
-        Canvas(modifier = Modifier.size(290.dp, 200.dp)) {
+        Canvas(modifier = Modifier.size(270.dp, 180.dp)) {
             val w = size.width
             val h = size.height
 
-            // Soft radial shadow under cards
             drawOval(
                 color = palette.ink.copy(alpha = 0.07f),
                 topLeft = Offset(w * 0.12f, h * 0.84f),
                 size = Size(w * 0.76f, h * 0.12f)
             )
 
-            // Four-point soft green sparkles (+) from mockup
             fun drawSparkle(cx: Float, cy: Float, r: Float) {
                 val p = Path().apply {
                     moveTo(cx, cy - r)
@@ -200,11 +204,10 @@ fun WelcomeDocumentsHeroIllustration(
                 }
                 drawPath(p, color = Color(0xFF78A88F))
             }
-            drawSparkle(w * 0.10f, h * 0.12f, 11f)
-            drawSparkle(w * 0.22f, h * 0.07f, 7f)
-            drawSparkle(w * 0.85f, h * 0.12f, 12f)
+            drawSparkle(w * 0.10f, h * 0.12f, 10f)
+            drawSparkle(w * 0.22f, h * 0.07f, 6f)
+            drawSparkle(w * 0.85f, h * 0.12f, 11f)
 
-            // 1. Top-left tilted DRIVING LICENSE card
             rotate(degrees = -7f, pivot = Offset(w * 0.34f, h * 0.36f)) {
                 val cardLeft = w * 0.07f
                 val cardTop = h * 0.17f
@@ -223,14 +226,12 @@ fun WelcomeDocumentsHeroIllustration(
                     cornerRadius = CornerRadius(18f, 18f),
                     style = Stroke(width = 3.2f)
                 )
-                // Blue header bar
                 drawRoundRect(
                     color = Color(0xFFD6E4F5),
                     topLeft = Offset(cardLeft + 10f, cardTop + 10f),
                     size = Size(cardW - 20f, cardH * 0.25f),
                     cornerRadius = CornerRadius(10f, 10f)
                 )
-                // Avatar box
                 drawRoundRect(
                     color = Color(0xFFDCE4EE),
                     topLeft = Offset(cardLeft + 14f, cardTop + cardH * 0.36f),
@@ -242,7 +243,6 @@ fun WelcomeDocumentsHeroIllustration(
                     radius = cardW * 0.065f,
                     center = Offset(cardLeft + 14f + cardW * 0.13f, cardTop + cardH * 0.54f)
                 )
-                // Text lines
                 for (i in 0..2) {
                     drawRoundRect(
                         color = Color(0xFFB8C2CC),
@@ -253,7 +253,6 @@ fun WelcomeDocumentsHeroIllustration(
                 }
             }
 
-            // 2. Bottom-left tilted NATIONAL ID card
             rotate(degrees = -5f, pivot = Offset(w * 0.35f, h * 0.68f)) {
                 val cardLeft = w * 0.09f
                 val cardTop = h * 0.49f
@@ -272,14 +271,12 @@ fun WelcomeDocumentsHeroIllustration(
                     cornerRadius = CornerRadius(18f, 18f),
                     style = Stroke(width = 3.2f)
                 )
-                // Mint header bar
                 drawRoundRect(
                     color = Color(0xFFD5EAE0),
                     topLeft = Offset(cardLeft + 10f, cardTop + 10f),
                     size = Size(cardW - 20f, cardH * 0.24f),
                     cornerRadius = CornerRadius(10f, 10f)
                 )
-                // Avatar box
                 drawRoundRect(
                     color = Color(0xFFCDE5DB),
                     topLeft = Offset(cardLeft + 14f, cardTop + cardH * 0.36f),
@@ -301,7 +298,6 @@ fun WelcomeDocumentsHeroIllustration(
                 }
             }
 
-            // 3. Right tilted Navy PASSPORT booklet with Gold Globe emblem
             rotate(degrees = 10f, pivot = Offset(w * 0.72f, h * 0.55f)) {
                 val passLeft = w * 0.54f
                 val passTop = h * 0.26f
@@ -313,7 +309,6 @@ fun WelcomeDocumentsHeroIllustration(
                     size = Size(passW, passH),
                     cornerRadius = CornerRadius(18f, 18f)
                 )
-                // Gold globe circle
                 val globeCenter = Offset(passLeft + passW * 0.5f, passTop + passH * 0.48f)
                 val globeR = passW * 0.22f
                 val goldColor = Color(0xFFE5C168)
@@ -335,7 +330,6 @@ fun WelcomeDocumentsHeroIllustration(
                     end = Offset(globeCenter.x + globeR, globeCenter.y),
                     strokeWidth = 2.2f
                 )
-                // Top and bottom gold bars representing "PASSPORT"
                 drawRoundRect(
                     color = goldColor,
                     topLeft = Offset(passLeft + passW * 0.24f, passTop + passH * 0.16f),
@@ -354,8 +348,7 @@ fun WelcomeDocumentsHeroIllustration(
 }
 
 /**
- * Custom illustration reproducing Screen 5 of the SAFEAREA mockup:
- * Manila Folder with Padlock and green rays.
+ * Custom Manila Folder with Padlock illustration.
  */
 @Composable
 fun FolderWithLockIllustration(
@@ -364,21 +357,19 @@ fun FolderWithLockIllustration(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(110.dp),
+            .height(96.dp),
         contentAlignment = Alignment.Center
     ) {
-        Canvas(modifier = Modifier.size(160.dp, 100.dp)) {
+        Canvas(modifier = Modifier.size(150.dp, 90.dp)) {
             val w = size.width
             val h = size.height
 
-            // Soft green rays on left and right
             val rayColor = Color(0xFF9AC5AF)
             drawLine(rayColor, Offset(w * 0.08f, h * 0.22f), Offset(w * 0.18f, h * 0.30f), strokeWidth = 6f, cap = StrokeCap.Round)
             drawLine(rayColor, Offset(w * 0.05f, h * 0.42f), Offset(w * 0.16f, h * 0.44f), strokeWidth = 6f, cap = StrokeCap.Round)
             drawLine(rayColor, Offset(w * 0.92f, h * 0.22f), Offset(w * 0.82f, h * 0.30f), strokeWidth = 6f, cap = StrokeCap.Round)
             drawLine(rayColor, Offset(w * 0.95f, h * 0.42f), Offset(w * 0.84f, h * 0.44f), strokeWidth = 6f, cap = StrokeCap.Round)
 
-            // Back folder tab
             val fLeft = w * 0.24f
             val fTop = h * 0.20f
             val fW = w * 0.52f
@@ -389,14 +380,12 @@ fun FolderWithLockIllustration(
                 size = Size(fW * 0.45f, fH * 0.32f),
                 cornerRadius = CornerRadius(12f, 12f)
             )
-            // White paper peeking out
             drawRoundRect(
                 color = Color(0xFFFFFDF7),
                 topLeft = Offset(fLeft + 10f, fTop + 8f),
                 size = Size(fW - 20f, fH * 0.4f),
                 cornerRadius = CornerRadius(8f, 8f)
             )
-            // Front Manila folder body
             drawRoundRect(
                 color = Color(0xFFF3DCAC),
                 topLeft = Offset(fLeft, fTop + fH * 0.18f),
@@ -411,7 +400,6 @@ fun FolderWithLockIllustration(
                 style = Stroke(width = 3.5f)
             )
 
-            // Navy Padlock in center of folder
             val lockCx = w * 0.50f
             val lockCy = fTop + fH * 0.62f
             drawArc(
@@ -439,7 +427,7 @@ fun FolderWithLockIllustration(
 }
 
 /**
- * Rounded-square top navigation icon button matching the mockup (`←` and `•••`).
+ * Rounded-square top navigation icon button (48dp touch target).
  */
 @Composable
 fun SafeAreaTopIconButton(
@@ -451,12 +439,12 @@ fun SafeAreaTopIconButton(
     val palette = LocalSafeAreaPalette.current
     Surface(
         modifier = modifier
-            .size(44.dp)
-            .clip(RoundedCornerShape(13.dp))
+            .size(48.dp)
+            .clip(RoundedCornerShape(14.dp))
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(13.dp),
-        color = palette.surface.copy(alpha = 0.6f),
-        border = BorderStroke(1.3.dp, palette.border)
+        shape = RoundedCornerShape(14.dp),
+        color = palette.surface.copy(alpha = 0.7f),
+        border = BorderStroke(1.2.dp, palette.border.copy(alpha = 0.65f))
     ) {
         Box(contentAlignment = Alignment.Center) {
             Icon(
@@ -496,7 +484,8 @@ fun SafeAreaMoreButton(
 }
 
 /**
- * Raspberry primary pill CTA button matching the mockup.
+ * Responsive primary pill CTA button.
+ * Uses `heightIn(min = 50.dp)` instead of fixed height so multi-line or scaled text never clips.
  */
 @Composable
 fun SafeAreaPrimaryButton(
@@ -513,15 +502,16 @@ fun SafeAreaPrimaryButton(
         enabled = enabled,
         modifier = modifier
             .fillMaxWidth()
-            .height(54.dp),
-        shape = RoundedCornerShape(28.dp),
+            .heightIn(min = 50.dp),
+        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp),
+        shape = RoundedCornerShape(26.dp),
         colors = ButtonDefaults.buttonColors(
             containerColor = palette.primary,
             contentColor = Color(0xFFFFFDF7),
             disabledContainerColor = palette.primary.copy(alpha = 0.45f),
             disabledContentColor = Color(0xFFFFFDF7).copy(alpha = 0.7f)
         ),
-        elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp)
+        elevation = ButtonDefaults.buttonElevation(defaultElevation = 1.dp)
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -531,7 +521,7 @@ fun SafeAreaPrimaryButton(
                 Icon(
                     imageVector = leadingIcon,
                     contentDescription = null,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(19.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
             }
@@ -539,14 +529,16 @@ fun SafeAreaPrimaryButton(
                 text = text,
                 style = MaterialTheme.typography.titleMedium.copy(
                     fontWeight = FontWeight.Bold,
-                    fontSize = 17.sp
-                )
+                    fontSize = 15.sp,
+                    lineHeight = 20.sp
+                ),
+                textAlign = TextAlign.Center
             )
             if (trailingArrow) {
-                Spacer(modifier = Modifier.width(10.dp))
+                Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = "▶",
-                    fontSize = 14.sp,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Bold
                 )
             }
@@ -555,7 +547,8 @@ fun SafeAreaPrimaryButton(
 }
 
 /**
- * Outlined navy pill button matching `+ Add Document`, `View Full Image`, and `Share Document` in the mockup.
+ * Responsive outlined pill button.
+ * Uses `heightIn(min = 48.dp)` and adaptive padding so text never clips on compact screens or large font scales.
  */
 @Composable
 fun SafeAreaOutlinedPillButton(
@@ -569,11 +562,12 @@ fun SafeAreaOutlinedPillButton(
         onClick = onClick,
         modifier = modifier
             .fillMaxWidth()
-            .height(50.dp),
-        shape = RoundedCornerShape(25.dp),
-        border = BorderStroke(1.3.dp, palette.border),
+            .heightIn(min = 48.dp),
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+        shape = RoundedCornerShape(24.dp),
+        border = BorderStroke(1.2.dp, palette.border.copy(alpha = 0.8f)),
         colors = ButtonDefaults.outlinedButtonColors(
-            containerColor = palette.surface.copy(alpha = 0.55f),
+            containerColor = palette.surface.copy(alpha = 0.65f),
             contentColor = palette.ink
         )
     ) {
@@ -586,67 +580,102 @@ fun SafeAreaOutlinedPillButton(
                     imageVector = leadingIcon,
                     contentDescription = null,
                     tint = palette.ink,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(18.dp)
                 )
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(6.dp))
             }
             Text(
                 text = text,
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                color = palette.ink
+                style = MaterialTheme.typography.titleSmall.copy(
+                    fontWeight = FontWeight.Bold,
+                    lineHeight = 18.sp
+                ),
+                color = palette.ink,
+                textAlign = TextAlign.Center
             )
         }
     }
 }
 
 /**
- * Document category icon badge matching Screen 3 of the mockup.
+ * Maps each of the 9 `DocumentCategoryGroup` entries to a distinctive vector icon.
+ */
+fun categoryGroupIcon(group: DocumentCategoryGroup): ImageVector {
+    return when (group) {
+        DocumentCategoryGroup.PERSONAL -> Icons.Default.Badge
+        DocumentCategoryGroup.EDUCATION -> Icons.Default.School
+        DocumentCategoryGroup.FINANCIAL -> Icons.Default.AccountBalance
+        DocumentCategoryGroup.MEDICAL -> Icons.Default.HealthAndSafety
+        DocumentCategoryGroup.EMPLOYMENT -> Icons.Default.WorkOutline
+        DocumentCategoryGroup.LEGAL -> Icons.Default.Gavel
+        DocumentCategoryGroup.TRAVEL -> Icons.Default.FlightTakeoff
+        DocumentCategoryGroup.VEHICLE -> Icons.Default.DirectionsCar
+        DocumentCategoryGroup.OTHER -> Icons.Default.Description
+    }
+}
+
+/**
+ * Document category icon badge for all 9 category groups.
  */
 @Composable
 fun DocumentCategoryIconBox(
-    iconType: DocumentIconType,
+    categoryGroup: DocumentCategoryGroup,
     modifier: Modifier = Modifier,
     size: Dp = 46.dp
 ) {
-    val iconVector = when (iconType) {
-        DocumentIconType.DRIVING -> Icons.Default.DirectionsCar
-        DocumentIconType.CITIZENSHIP -> Icons.Default.Groups
-        DocumentIconType.NATIONAL_ID -> Icons.Default.Badge
-        DocumentIconType.PASSPORT -> Icons.Default.FlightTakeoff
-        DocumentIconType.EDUCATION -> Icons.Default.School
-        DocumentIconType.FINANCE -> Icons.Outlined.AccountBalance
-        DocumentIconType.HEALTH -> Icons.Default.HealthAndSafety
-        DocumentIconType.ADDRESS -> Icons.Default.Home
-        DocumentIconType.WORK -> Icons.Default.WorkOutline
-        DocumentIconType.OTHER -> Icons.Default.Description
-    }
+    val iconVector = categoryGroupIcon(categoryGroup)
     Box(
         modifier = modifier
             .size(size)
-            .clip(RoundedCornerShape(12.dp))
-            .background(Color(iconType.badgeHex)),
+            .clip(RoundedCornerShape(13.dp))
+            .background(Color(categoryGroup.badgeHex)),
         contentAlignment = Alignment.Center
     ) {
         Icon(
             imageVector = iconVector,
-            contentDescription = iconType.label,
-            tint = Color(iconType.iconTintHex),
-            modifier = Modifier.size(size * 0.54f)
+            contentDescription = categoryGroup.title,
+            tint = Color(categoryGroup.iconTintHex),
+            modifier = Modifier.size(size * 0.52f)
         )
     }
 }
 
 /**
- * Editorial Document Row Card matching Screen 3 of the SAFEAREA mockup.
+ * Format & Size helper used across cards.
  */
+fun formatCompactFileSize(bytes: Long): String {
+    if (bytes <= 0L) return ""
+    return when {
+        bytes < 1024L -> "$bytes B"
+        bytes < 1024L * 1024L -> String.format(Locale.US, "%.1f KB", bytes / 1024.0)
+        else -> String.format(Locale.US, "%.2f MB", bytes / (1024.0 * 1024.0))
+    }
+}
+
+/**
+ * Apple-inspired responsive Document Row Card supporting:
+ * - Category icon badge
+ * - Format badge (PDF, DOCX, XLSX, JPG, etc.)
+ * - File size & subtype
+ * - Expiry status badge
+ * - Favourite indicator
+ * - Multi-select mode checkbox & long-press bulk selection
+ */
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun SafeAreaDocumentRowCard(
     title: String,
     subtitle: String,
-    iconType: DocumentIconType,
+    categoryGroup: DocumentCategoryGroup,
+    formatBadge: String? = null,
+    fileSizeText: String? = null,
     expiryBadgeText: String? = null,
     isExpiringSoon: Boolean = false,
+    isFavourite: Boolean = false,
+    isSelectionMode: Boolean = false,
+    isSelected: Boolean = false,
     onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val palette = LocalSafeAreaPalette.current
@@ -654,10 +683,16 @@ fun SafeAreaDocumentRowCard(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(18.dp))
-            .clickable(onClick = onClick),
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick
+            ),
         shape = RoundedCornerShape(18.dp),
-        color = palette.surface,
-        border = BorderStroke(1.1.dp, palette.border.copy(alpha = 0.35f))
+        color = if (isSelected) palette.primary.copy(alpha = 0.10f) else palette.surface,
+        border = BorderStroke(
+            width = if (isSelected) 1.8.dp else 1.1.dp,
+            color = if (isSelected) palette.primary else palette.border.copy(alpha = 0.28f)
+        )
     ) {
         Row(
             modifier = Modifier
@@ -665,34 +700,93 @@ fun SafeAreaDocumentRowCard(
                 .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            DocumentCategoryIconBox(iconType = iconType)
-            Spacer(modifier = Modifier.width(14.dp))
+            if (isSelectionMode) {
+                Icon(
+                    imageVector = if (isSelected) Icons.Default.CheckBox else Icons.Default.CheckBoxOutlineBlank,
+                    contentDescription = if (isSelected) "Selected" else "Not selected",
+                    tint = if (isSelected) palette.primary else palette.inkMuted,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+            }
+
+            DocumentCategoryIconBox(categoryGroup = categoryGroup)
+            Spacer(modifier = Modifier.width(12.dp))
+
             Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = palette.ink,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    if (isFavourite) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Icon(
+                            imageVector = Icons.Default.Star,
+                            contentDescription = "Favourite",
+                            tint = Color(0xFFE09F1F),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(3.dp))
+
                 Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = palette.ink,
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = palette.inkMuted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                Spacer(modifier = Modifier.height(2.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = subtitle,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = palette.inkMuted,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    if (!expiryBadgeText.isNullOrBlank()) {
-                        Spacer(modifier = Modifier.width(8.dp))
+
+                Spacer(modifier = Modifier.height(5.dp))
+
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    if (!formatBadge.isNullOrBlank()) {
                         Surface(
-                            shape = RoundedCornerShape(8.dp),
+                            shape = RoundedCornerShape(6.dp),
+                            color = palette.canvas,
+                            border = BorderStroke(0.8.dp, palette.border.copy(alpha = 0.25f))
+                        ) {
+                            Text(
+                                text = formatBadge,
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                color = palette.ink,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+
+                    if (!fileSizeText.isNullOrBlank()) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = palette.canvas
+                        ) {
+                            Text(
+                                text = fileSizeText,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = palette.inkMuted,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+
+                    if (!expiryBadgeText.isNullOrBlank()) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
                             color = if (isExpiringSoon) palette.warningContainer else palette.successContainer
                         ) {
                             Text(
                                 text = expiryBadgeText,
-                                style = MaterialTheme.typography.labelMedium,
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
                                 color = if (isExpiringSoon) Color(0xFF8A5A00) else palette.success,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                             )
@@ -700,10 +794,13 @@ fun SafeAreaDocumentRowCard(
                     }
                 }
             }
+
+            Spacer(modifier = Modifier.width(8.dp))
+
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = "Open $title",
-                tint = palette.ink,
+                tint = palette.inkMuted,
                 modifier = Modifier.size(22.dp)
             )
         }
@@ -711,8 +808,7 @@ fun SafeAreaDocumentRowCard(
 }
 
 /**
- * Compact 5-destination Bottom Navigation Bar matching the SAFEAREA mockup and Section 4 IA:
- * Home, Documents, Add, Tools, Profile.
+ * Responsive 5-destination Bottom Navigation Bar.
  */
 @Composable
 fun SafeAreaBottomNavigationBar(
@@ -738,8 +834,8 @@ fun SafeAreaBottomNavigationBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .windowInsetsPadding(WindowInsets.navigationBars)
-                .padding(horizontal = 8.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceAround,
+                .padding(horizontal = 4.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
             items.forEach { item ->
@@ -747,9 +843,10 @@ fun SafeAreaBottomNavigationBar(
                 val tint = if (isSelected) palette.primary else palette.ink
                 Column(
                     modifier = Modifier
+                        .weight(1f)
                         .clip(RoundedCornerShape(12.dp))
                         .clickable { onNavigate(item.screen) }
-                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                        .padding(vertical = 6.dp)
                         .testTag("nav_${item.label.lowercase()}"),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
@@ -757,7 +854,7 @@ fun SafeAreaBottomNavigationBar(
                         imageVector = if (isSelected) item.selectedIcon else item.unselectedIcon,
                         contentDescription = item.label,
                         tint = tint,
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(23.dp)
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
@@ -765,7 +862,9 @@ fun SafeAreaBottomNavigationBar(
                         style = MaterialTheme.typography.labelMedium.copy(
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                         ),
-                        color = tint
+                        color = tint,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }

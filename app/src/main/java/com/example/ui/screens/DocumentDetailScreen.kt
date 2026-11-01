@@ -5,19 +5,22 @@ import android.graphics.BitmapFactory
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -34,10 +37,14 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.DriveFileMove
+import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FileCopy
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.PersonOutline
 import androidx.compose.material.icons.filled.RotateRight
 import androidx.compose.material.icons.filled.Share
@@ -53,6 +60,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -68,49 +76,58 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.data.CryptoStorageManager
 import com.example.data.DocumentEntity
-import com.example.data.DocumentFieldEntity
 import com.example.data.DocumentWithFields
 import com.example.data.FieldSource
+import com.example.data.SupportedFileFormatGroup
+import com.example.data.VaultRepository
+import com.example.ui.components.DocumentCategoryIconBox
 import com.example.ui.components.SafeAreaBackButton
 import com.example.ui.components.SafeAreaMoreButton
 import com.example.ui.components.SafeAreaOutlinedPillButton
 import com.example.ui.components.SafeAreaPrimaryButton
+import com.example.ui.components.formatCompactFileSize
+import com.example.ui.daysUntilExpiry
 import com.example.ui.theme.LocalSafeAreaPalette
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
- * Screen 4 of the SAFEAREA 5-screen mockup: Document Details.
+ * Universal Document Detail & Viewer Screen:
+ * - Zero fake or mock cards
+ * - Real PDF multi-page rendering via Android PdfRenderer
+ * - Real decrypted image preview with rotation & pinch-to-zoom
+ * - Real in-app text/content preview for Word (.docx/.doc), Excel (.xlsx/.xls), PowerPoint (.pptx/.ppt),
+ *   OpenDocument (.odt/.ods/.odp), Text (.txt/.rtf/.md), CSV, JSON, and XML
+ * - Rename, Duplicate, Move Category, Edit Details, Open in External Viewer, Archive/Restore, Share, Delete
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun DocumentDetailScreen(
     docWithFields: DocumentWithFields?,
+    allCategories: List<String>,
     cryptoStorage: CryptoStorageManager,
+    repository: VaultRepository,
     onBack: () -> Unit,
     onEditDocument: (DocumentWithFields) -> Unit,
+    onRenameDocument: (DocumentEntity, String) -> Unit,
+    onDuplicateDocument: (DocumentWithFields) -> Unit,
+    onMoveCategory: (DocumentEntity, String) -> Unit,
     onToggleFavourite: (DocumentEntity) -> Unit,
     onToggleArchive: (DocumentEntity) -> Unit,
     onRotateAttachment: (DocumentEntity, Boolean) -> Unit,
@@ -118,6 +135,7 @@ fun DocumentDetailScreen(
     onConfirmOcrFields: (Long) -> Unit,
     onCopySingleField: (String, String) -> Unit,
     onCopyAllFields: (DocumentWithFields) -> Unit,
+    onOpenExternalViewer: (DocumentEntity) -> Unit,
     onShareDocument: (DocumentWithFields, Boolean) -> Unit
 ) {
     val palette = LocalSafeAreaPalette.current
@@ -144,24 +162,29 @@ fun DocumentDetailScreen(
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showShareWarning by remember { mutableStateOf(false) }
     var showFullViewer by remember { mutableStateOf(false) }
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var renameInput by remember(doc.title) { mutableStateOf(doc.title) }
+    var showMoveCategoryDialog by remember { mutableStateOf(false) }
     var showBackSide by remember { mutableStateOf(false) }
 
-    // Track which sensitive fields have been explicitly revealed by user
     val revealedFields = remember { mutableStateMapOf<Long, Boolean>() }
 
-    // Load decrypted bitmap or PDF page if attached
     val activeFileRef = if (showBackSide && doc.backFileRef.isNotBlank()) doc.backFileRef else doc.frontFileRef
     var previewBitmap by remember(activeFileRef) { mutableStateOf<Bitmap?>(null) }
+    var extractedTextPreview by remember(activeFileRef) { mutableStateOf<String?>(null) }
     var pdfPageCount by remember(activeFileRef) { mutableIntStateOf(1) }
     var currentPdfPage by remember(activeFileRef) { mutableIntStateOf(0) }
 
-    LaunchedEffect(activeFileRef, currentPdfPage) {
+    LaunchedEffect(activeFileRef, currentPdfPage, doc.mimeType, doc.fileExtension) {
         if (activeFileRef.isBlank()) {
             previewBitmap = null
+            extractedTextPreview = null
             return@LaunchedEffect
         }
         withContext(Dispatchers.IO) {
-            if (doc.mimeType.contains("pdf", ignoreCase = true)) {
+            val formatGroup = doc.formatGroup
+            if (formatGroup == SupportedFileFormatGroup.PDF || doc.mimeType.contains("pdf", ignoreCase = true)) {
+                extractedTextPreview = null
                 val pdfFile = cryptoStorage.writeDecryptedTempFileForPreviewOrShare(activeFileRef, "pdf")
                 if (pdfFile != null && pdfFile.exists()) {
                     runCatching {
@@ -183,32 +206,37 @@ fun DocumentDetailScreen(
                         }
                     }
                 }
-            } else {
+            } else if (formatGroup == SupportedFileFormatGroup.IMAGE || doc.mimeType.startsWith("image/", ignoreCase = true)) {
+                extractedTextPreview = null
                 val bytes = cryptoStorage.readDecryptedFile(activeFileRef)
                 if (bytes != null) {
                     previewBitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                 }
+            } else {
+                previewBitmap = null
+                extractedTextPreview = repository.readDocumentTextPreview(doc)
             }
         }
     }
 
     val hasUnconfirmedOcr = fields.any { !it.userConfirmed }
+    val dateFormatter = remember { SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.getDefault()) }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(palette.canvas)
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 14.dp),
+            .padding(horizontal = 18.dp, vertical = 14.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .widthIn(max = 520.dp),
+                .widthIn(max = 560.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Top bar matching Screen 4 of the mockup (`←` and `•••`)
+            // Top Bar
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -216,140 +244,265 @@ fun DocumentDetailScreen(
             ) {
                 SafeAreaBackButton(onClick = onBack)
 
-                Box {
-                    SafeAreaMoreButton(onClick = { showMenu = true })
-                    DropdownMenu(
-                        expanded = showMenu,
-                        onDismissRequest = { showMenu = false },
-                        modifier = Modifier.background(palette.surface)
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("Edit Details & Fields", color = palette.ink) },
-                            leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null, tint = palette.ink) },
-                            onClick = {
-                                showMenu = false
-                                onEditDocument(docWithFields)
-                            }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { onToggleFavourite(doc) }) {
+                        Icon(
+                            imageVector = if (doc.favourite) Icons.Default.Star else Icons.Default.StarBorder,
+                            contentDescription = if (doc.favourite) "Remove from favourites" else "Add to favourites",
+                            tint = if (doc.favourite) Color(0xFFE09F1F) else palette.ink
                         )
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    if (doc.favourite) "Remove from Favourites" else "Add to Favourites",
-                                    color = palette.ink
-                                )
-                            },
-                            leadingIcon = {
-                                Icon(
-                                    if (doc.favourite) Icons.Default.Star else Icons.Default.StarBorder,
-                                    contentDescription = null,
-                                    tint = palette.primary
-                                )
-                            },
-                            onClick = {
-                                showMenu = false
-                                onToggleFavourite(doc)
-                            }
-                        )
-                        if (activeFileRef.isNotBlank() && !doc.mimeType.contains("pdf")) {
+                    }
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Box {
+                        SafeAreaMoreButton(onClick = { showMenu = true })
+                        DropdownMenu(
+                            expanded = showMenu,
+                            onDismissRequest = { showMenu = false },
+                            modifier = Modifier.background(palette.surface)
+                        ) {
                             DropdownMenuItem(
-                                text = { Text("Rotate Image 90°", color = palette.ink) },
-                                leadingIcon = { Icon(Icons.Default.RotateRight, contentDescription = null, tint = palette.ink) },
+                                text = { Text("Edit Details & Fields", color = palette.ink) },
+                                leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null, tint = palette.ink) },
                                 onClick = {
                                     showMenu = false
-                                    onRotateAttachment(doc, showBackSide)
+                                    onEditDocument(docWithFields)
                                 }
                             )
-                        }
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    if (doc.archived) "Restore from Archive" else "Archive Document",
-                                    color = palette.ink
-                                )
-                            },
-                            leadingIcon = { Icon(Icons.Default.Archive, contentDescription = null, tint = palette.ink) },
-                            onClick = {
-                                showMenu = false
-                                onToggleArchive(doc)
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Delete Document", color = palette.danger, fontWeight = FontWeight.Bold) },
-                            leadingIcon = { Icon(Icons.Default.DeleteOutline, contentDescription = null, tint = palette.danger) },
-                            onClick = {
-                                showMenu = false
-                                showDeleteConfirm = true
-                            }
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Document Preview Card (Real Decrypted Image/PDF or National ID Card Illustration from Screen 4)
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
-                    .clickable { showFullViewer = true }
-                    .testTag("document_preview_card")
-            ) {
-                val bmp = previewBitmap
-                if (bmp != null) {
-                    Surface(
-                        shape = RoundedCornerShape(20.dp),
-                        color = palette.surface,
-                        border = BorderStroke(1.2.dp, palette.border.copy(alpha = 0.4f))
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Image(
-                                bitmap = bmp.asImageBitmap(),
-                                contentDescription = "Document preview for ${doc.title}",
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(210.dp)
+                            DropdownMenuItem(
+                                text = { Text("Rename Document", color = palette.ink) },
+                                leadingIcon = { Icon(Icons.Default.DriveFileRenameOutline, contentDescription = null, tint = palette.ink) },
+                                onClick = {
+                                    showMenu = false
+                                    renameInput = doc.title
+                                    showRenameDialog = true
+                                }
                             )
-                            if (doc.mimeType.contains("pdf", ignoreCase = true) && pdfPageCount > 1) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(palette.surface)
-                                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    TextButton(
-                                        enabled = currentPdfPage > 0,
-                                        onClick = { currentPdfPage-- }
-                                    ) {
-                                        Text("◀ Prev")
+                            DropdownMenuItem(
+                                text = { Text("Move to Category", color = palette.ink) },
+                                leadingIcon = { Icon(Icons.Default.DriveFileMove, contentDescription = null, tint = palette.ink) },
+                                onClick = {
+                                    showMenu = false
+                                    showMoveCategoryDialog = true
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Duplicate Document", color = palette.ink) },
+                                leadingIcon = { Icon(Icons.Default.FileCopy, contentDescription = null, tint = palette.ink) },
+                                onClick = {
+                                    showMenu = false
+                                    onDuplicateDocument(docWithFields)
+                                }
+                            )
+                            if (activeFileRef.isNotBlank() && doc.formatGroup == SupportedFileFormatGroup.IMAGE) {
+                                DropdownMenuItem(
+                                    text = { Text("Rotate Image 90°", color = palette.ink) },
+                                    leadingIcon = { Icon(Icons.Default.RotateRight, contentDescription = null, tint = palette.ink) },
+                                    onClick = {
+                                        showMenu = false
+                                        onRotateAttachment(doc, showBackSide)
                                     }
+                                )
+                            }
+                            if (doc.frontFileRef.isNotBlank()) {
+                                DropdownMenuItem(
+                                    text = { Text("Open in External Viewer", color = palette.ink) },
+                                    leadingIcon = { Icon(Icons.Default.OpenInNew, contentDescription = null, tint = palette.ink) },
+                                    onClick = {
+                                        showMenu = false
+                                        onOpenExternalViewer(doc)
+                                    }
+                                )
+                            }
+                            DropdownMenuItem(
+                                text = {
                                     Text(
-                                        text = "PDF Page ${currentPdfPage + 1} of $pdfPageCount",
-                                        style = MaterialTheme.typography.labelMedium,
+                                        if (doc.archived) "Restore from Archive" else "Archive Document",
                                         color = palette.ink
                                     )
-                                    TextButton(
-                                        enabled = currentPdfPage < pdfPageCount - 1,
-                                        onClick = { currentPdfPage++ }
-                                    ) {
-                                        Text("Next ▶")
-                                    }
+                                },
+                                leadingIcon = { Icon(Icons.Default.Archive, contentDescription = null, tint = palette.ink) },
+                                onClick = {
+                                    showMenu = false
+                                    onToggleArchive(doc)
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Delete Permanently", color = palette.danger, fontWeight = FontWeight.Bold) },
+                                leadingIcon = { Icon(Icons.Default.DeleteOutline, contentDescription = null, tint = palette.danger) },
+                                onClick = {
+                                    showMenu = false
+                                    showDeleteConfirm = true
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Real Document Preview Card (PDF / Image / Office / Text / Structured Record)
+            val bmp = previewBitmap
+            val textContent = extractedTextPreview
+
+            if (bmp != null) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(20.dp))
+                        .clickable { showFullViewer = true }
+                        .testTag("document_preview_card"),
+                    shape = RoundedCornerShape(20.dp),
+                    color = palette.surface,
+                    border = BorderStroke(1.2.dp, palette.border.copy(alpha = 0.35f))
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Image(
+                            bitmap = bmp.asImageBitmap(),
+                            contentDescription = "Document preview for ${doc.title}",
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 190.dp, max = 260.dp)
+                                .background(palette.canvas)
+                                .padding(8.dp)
+                        )
+                        if (doc.formatGroup == SupportedFileFormatGroup.PDF && pdfPageCount > 1) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(palette.surface)
+                                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                TextButton(
+                                    enabled = currentPdfPage > 0,
+                                    onClick = { currentPdfPage-- }
+                                ) {
+                                    Text("◀ Prev")
+                                }
+                                Text(
+                                    text = "Page ${currentPdfPage + 1} of $pdfPageCount",
+                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                                    color = palette.ink
+                                )
+                                TextButton(
+                                    enabled = currentPdfPage < pdfPageCount - 1,
+                                    onClick = { currentPdfPage++ }
+                                ) {
+                                    Text("Next ▶")
                                 }
                             }
                         }
                     }
-                } else {
-                    MockupNationalIdCardVisual(
-                        document = doc,
-                        holderName = fields.find { it.label.contains("Name", ignoreCase = true) }?.value ?: "Rahul Shah"
-                    )
+                }
+            } else if (!textContent.isNullOrBlank()) {
+                // In-app Office / OpenDocument / Text / CSV / JSON / XML Viewer Card
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("document_preview_card"),
+                    shape = RoundedCornerShape(20.dp),
+                    color = palette.surface,
+                    border = BorderStroke(1.2.dp, palette.border.copy(alpha = 0.35f))
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                DocumentCategoryIconBox(categoryGroup = doc.categoryGroup, size = 40.dp)
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                    Text(
+                                        text = "In-App ${doc.displayFormatBadge} Content Preview",
+                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                        color = palette.ink
+                                    )
+                                    Text(
+                                        text = doc.originalFileName.ifBlank { doc.title },
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = palette.inkMuted
+                                    )
+                                }
+                            }
+                            TextButton(onClick = { showFullViewer = true }) {
+                                Text("Expand", color = palette.primary, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = palette.canvas,
+                            border = BorderStroke(0.8.dp, palette.border.copy(alpha = 0.25f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 120.dp, max = 220.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .padding(12.dp)
+                                    .verticalScroll(rememberScrollState())
+                                    .horizontalScroll(rememberScrollState())
+                            ) {
+                                Text(
+                                    text = textContent,
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = palette.ink
+                                )
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Clean Real Document Header Summary Card (when no binary image/text preview is attached)
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("document_preview_card"),
+                    shape = RoundedCornerShape(20.dp),
+                    color = palette.surface,
+                    border = BorderStroke(1.2.dp, palette.border.copy(alpha = 0.35f))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(18.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        DocumentCategoryIconBox(categoryGroup = doc.categoryGroup, size = 56.dp)
+                        Spacer(modifier = Modifier.width(14.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = doc.category,
+                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                                color = palette.primary
+                            )
+                            if (doc.documentSubtype.isNotBlank()) {
+                                Text(
+                                    text = doc.documentSubtype,
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = palette.ink
+                                )
+                            }
+                            Text(
+                                text = if (doc.originalFileName.isNotBlank()) {
+                                    "Encrypted File: ${doc.originalFileName} (${formatCompactFileSize(doc.fileSize)})"
+                                } else {
+                                    "Structured Vault Record · On-Device Encrypted"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = palette.inkMuted
+                            )
+                        }
+                    }
                 }
             }
 
-            // Front / Back toggle if two-sided ID
+            // Front / Back Side Toggle if Two-Sided Scan
             if (doc.backFileRef.isNotBlank()) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -384,7 +537,7 @@ fun DocumentDetailScreen(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Document Title matching Screen 4 of the mockup
+            // Document Title & Badges
             Text(
                 text = doc.title,
                 style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.ExtraBold),
@@ -392,165 +545,249 @@ fun DocumentDetailScreen(
                 modifier = Modifier.align(Alignment.Start)
             )
 
+            if (doc.description.isNotBlank()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = doc.description,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = palette.inkMuted,
+                    modifier = Modifier.align(Alignment.Start)
+                )
+            }
+
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Status Pill matching Screen 4 of the mockup while respecting Section 0/1 non-goals
-            // (Clearly labels OCR needing review, Sample Data, or User-Confirmed Vault Record)
-            Surface(
-                shape = RoundedCornerShape(20.dp),
-                color = if (hasUnconfirmedOcr) palette.warningContainer else palette.successContainer,
-                modifier = Modifier
-                    .clickable(enabled = hasUnconfirmedOcr) { onConfirmOcrFields(doc.id) }
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                // Status Pill
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = if (hasUnconfirmedOcr) palette.warningContainer else palette.successContainer,
+                    modifier = Modifier.clickable(enabled = hasUnconfirmedOcr) { onConfirmOcrFields(doc.id) }
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(18.dp)
-                            .clip(CircleShape)
-                            .background(if (hasUnconfirmedOcr) palette.warning else palette.success),
-                        contentAlignment = Alignment.Center
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(12.dp)
+                        Box(
+                            modifier = Modifier
+                                .size(16.dp)
+                                .clip(CircleShape)
+                                .background(if (hasUnconfirmedOcr) palette.warning else palette.success),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(11.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (hasUnconfirmedOcr) "OCR Review Needed · Tap to Confirm" else "Encrypted in Local Vault",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = if (hasUnconfirmedOcr) Color(0xFF7A4F00) else palette.success
                         )
                     }
-                    Spacer(modifier = Modifier.width(6.dp))
+                }
+
+                // Format Badge
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = palette.surface,
+                    border = BorderStroke(1.dp, palette.border.copy(alpha = 0.3f))
+                ) {
                     Text(
-                        text = when {
-                            hasUnconfirmedOcr -> "OCR Extracted · Tap to Confirm"
-                            doc.isSamplePlaceholder -> "Confirmed · Sample Preview"
-                            else -> "Confirmed · Local Vault"
+                        text = buildString {
+                            append(doc.displayFormatBadge)
+                            val s = formatCompactFileSize(doc.fileSize)
+                            if (s.isNotBlank()) append(" · $s")
                         },
-                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-                        color = if (hasUnconfirmedOcr) Color(0xFF7A4F00) else palette.success
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                        color = palette.ink,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
                     )
+                }
+
+                // Expiry Badge
+                val daysLeft = daysUntilExpiry(doc.expiryDate)
+                if (daysLeft != null) {
+                    val isUrgent = daysLeft <= 45L
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = if (isUrgent) palette.warningContainer else palette.successContainer
+                    ) {
+                        Text(
+                            text = when {
+                                daysLeft < 0L -> "Expired (${doc.expiryDate})"
+                                daysLeft == 0L -> "Expires Today"
+                                else -> "Expires in ${daysLeft}d (${doc.expiryDate})"
+                            },
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = if (isUrgent) Color(0xFF8A5A00) else palette.success,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                        )
+                    }
                 }
             }
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Structured Fields Card matching Screen 4 of the mockup
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(18.dp),
-                color = palette.surface,
-                border = BorderStroke(1.1.dp, palette.border.copy(alpha = 0.35f))
-            ) {
-                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-                    fields.forEachIndexed { idx, field ->
-                        val isRevealed = revealedFields[field.id] == true
-                        val shouldMask = field.isSensitive && field.isMaskedByDefault && !isRevealed
-                        val displayVal = if (shouldMask) maskSensitiveValue(field.value) else field.value
+            // Structured Fields Card
+            if (fields.isNotEmpty()) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp),
+                    color = palette.surface,
+                    border = BorderStroke(1.1.dp, palette.border.copy(alpha = 0.32f))
+                ) {
+                    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                        fields.forEachIndexed { idx, field ->
+                            val isRevealed = revealedFields[field.id] == true
+                            val shouldMask = field.isSensitive && field.isMaskedByDefault && !isRevealed
+                            val displayVal = if (shouldMask) maskSensitiveValue(field.value) else field.value
 
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .clickable {
-                                    onCopySingleField(field.label, field.value)
-                                }
-                                .padding(vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = when (field.iconKey) {
-                                    "person" -> Icons.Default.PersonOutline
-                                    "calendar" -> Icons.Default.CalendarToday
-                                    "id" -> Icons.Default.Badge
-                                    "gender" -> Icons.Default.PersonOutline
-                                    "location" -> Icons.Default.LocationOn
-                                    else -> Icons.Default.Info
-                                },
-                                contentDescription = null,
-                                tint = palette.ink,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column(modifier = Modifier.width(100.dp)) {
-                                Text(
-                                    text = field.label,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = palette.inkMuted
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable {
+                                        onCopySingleField(field.label, field.value)
+                                    }
+                                    .padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = when (field.iconKey) {
+                                        "person" -> Icons.Default.PersonOutline
+                                        "calendar" -> Icons.Default.CalendarToday
+                                        "id" -> Icons.Default.Badge
+                                        "gender" -> Icons.Default.PersonOutline
+                                        "location" -> Icons.Default.LocationOn
+                                        else -> Icons.Default.Info
+                                    },
+                                    contentDescription = null,
+                                    tint = palette.ink,
+                                    modifier = Modifier.size(20.dp)
                                 )
-                                if (field.source == FieldSource.OCR.name && !field.userConfirmed) {
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(0.42f)) {
                                     Text(
-                                        text = "OCR unconfirmed",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = Color(0xFF8A5A00)
+                                        text = field.label,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = palette.inkMuted
                                     )
+                                    if (field.source == FieldSource.OCR.name && !field.userConfirmed) {
+                                        Text(
+                                            text = "OCR unconfirmed",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = Color(0xFF8A5A00)
+                                        )
+                                    }
                                 }
-                            }
-                            Text(
-                                text = displayVal,
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                                color = palette.ink,
-                                modifier = Modifier.weight(1f)
-                            )
-                            if (field.isSensitive && field.isMaskedByDefault) {
+                                Text(
+                                    text = displayVal.ifBlank { "—" },
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                                    color = palette.ink,
+                                    modifier = Modifier.weight(0.58f)
+                                )
+                                if (field.isSensitive && field.isMaskedByDefault) {
+                                    IconButton(
+                                        onClick = { revealedFields[field.id] = !isRevealed },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isRevealed) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                            contentDescription = if (isRevealed) "Mask field" else "Reveal field",
+                                            tint = palette.inkMuted,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
                                 IconButton(
-                                    onClick = { revealedFields[field.id] = !isRevealed },
+                                    onClick = { onCopySingleField(field.label, field.value) },
                                     modifier = Modifier.size(32.dp)
                                 ) {
                                     Icon(
-                                        imageVector = if (isRevealed) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                        contentDescription = if (isRevealed) "Mask field" else "Reveal field",
+                                        imageVector = Icons.Default.ContentCopy,
+                                        contentDescription = "Copy ${field.label}",
                                         tint = palette.inkMuted,
-                                        modifier = Modifier.size(18.dp)
+                                        modifier = Modifier.size(17.dp)
                                     )
                                 }
                             }
-                            IconButton(
-                                onClick = { onCopySingleField(field.label, field.value) },
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.ContentCopy,
-                                    contentDescription = "Copy ${field.label}",
-                                    tint = palette.inkMuted,
-                                    modifier = Modifier.size(17.dp)
-                                )
-                            }
-                        }
 
-                        if (idx < fields.lastIndex) {
-                            HorizontalDivider(color = palette.border.copy(alpha = 0.12f))
+                            if (idx < fields.lastIndex) {
+                                HorizontalDivider(color = palette.border.copy(alpha = 0.12f))
+                            }
                         }
                     }
                 }
+                Spacer(modifier = Modifier.height(12.dp))
             }
 
-            // Metadata summary row (Category, Issue Date, Expiry Date, Notes)
-            Spacer(modifier = Modifier.height(10.dp))
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween
+            // Document Metadata & Timestamps Card
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                color = palette.surface,
+                border = BorderStroke(1.dp, palette.border.copy(alpha = 0.25f))
             ) {
-                Text(
-                    text = "Category: ${doc.category}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = palette.inkMuted
-                )
-                if (doc.expiryDate.isNotBlank()) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
                     Text(
-                        text = "Expires: ${doc.expiryDate}",
+                        text = "Category: ${doc.category}${if (doc.documentSubtype.isNotBlank()) " · ${doc.documentSubtype}" else ""}",
                         style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
                         color = palette.ink
+                    )
+                    if (doc.issuer.isNotBlank() || doc.country.isNotBlank()) {
+                        Text(
+                            text = "Issuer / Region: ${listOf(doc.issuer, doc.country).filter { it.isNotBlank() }.joinToString(" · ")}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = palette.inkMuted
+                        )
+                    }
+                    if (doc.issueDate.isNotBlank() || doc.expiryDate.isNotBlank()) {
+                        Text(
+                            text = buildString {
+                                if (doc.issueDate.isNotBlank()) append("Issued: ${doc.issueDate}   ")
+                                if (doc.expiryDate.isNotBlank()) append("Expires: ${doc.expiryDate}")
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = palette.inkMuted
+                        )
+                    }
+                    if (doc.tagsCsv.isNotBlank()) {
+                        Text(
+                            text = "Tags: ${doc.tagsCsv}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = palette.inkMuted
+                        )
+                    }
+                    if (doc.notes.isNotBlank()) {
+                        Text(
+                            text = "Notes: ${doc.notes}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = palette.ink
+                        )
+                    }
+                    Text(
+                        text = "Added: ${dateFormatter.format(Date(doc.createdAt))} · Modified: ${dateFormatter.format(Date(doc.updatedAt))}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = palette.inkMuted
                     )
                 }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Three stacked action buttons matching Screen 4 of the SAFEAREA mockup:
-            // 1. Copy All Info (Raspberry primary pill)
+            // Primary Action Buttons
             SafeAreaPrimaryButton(
                 text = "Copy All Info",
                 leadingIcon = Icons.Default.ContentCopy,
@@ -560,29 +797,59 @@ fun DocumentDetailScreen(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // 2. View Full Image (Outlined navy pill)
-            SafeAreaOutlinedPillButton(
-                text = "View Full Image",
-                leadingIcon = Icons.Default.Image,
-                onClick = { showFullViewer = true },
-                modifier = Modifier.testTag("view_full_image_button")
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                if (bmp != null || !textContent.isNullOrBlank()) {
+                    SafeAreaOutlinedPillButton(
+                        text = "Full Viewer",
+                        leadingIcon = Icons.Default.Image,
+                        onClick = { showFullViewer = true },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("view_full_image_button")
+                    )
+                }
+                if (doc.frontFileRef.isNotBlank()) {
+                    SafeAreaOutlinedPillButton(
+                        text = "External App",
+                        leadingIcon = Icons.Default.OpenInNew,
+                        onClick = { onOpenExternalViewer(doc) },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("open_external_viewer_button")
+                    )
+                }
+            }
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // 3. Share Document (Outlined navy pill)
-            SafeAreaOutlinedPillButton(
-                text = "Share Document",
-                leadingIcon = Icons.Default.Share,
-                onClick = { showShareWarning = true },
-                modifier = Modifier.testTag("share_document_button")
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                SafeAreaOutlinedPillButton(
+                    text = "Edit Details",
+                    leadingIcon = Icons.Default.Edit,
+                    onClick = { onEditDocument(docWithFields) },
+                    modifier = Modifier.weight(1f)
+                )
+                SafeAreaOutlinedPillButton(
+                    text = "Share / Export",
+                    leadingIcon = Icons.Default.Share,
+                    onClick = { showShareWarning = true },
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("share_document_button")
+                )
+            }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(24.dp))
         }
     }
 
-    // Full-screen zoomable viewer dialog
+    // Full-screen zoomable / scrollable viewer dialog
     if (showFullViewer) {
         var scale by remember { mutableFloatStateOf(1f) }
         var rotation by remember { mutableFloatStateOf(0f) }
@@ -606,16 +873,19 @@ fun DocumentDetailScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "${doc.title} · Pinch to Zoom",
+                            text = doc.title,
                             style = MaterialTheme.typography.titleMedium,
-                            color = Color.White
+                            color = Color.White,
+                            modifier = Modifier.weight(1f)
                         )
                         Row {
-                            IconButton(onClick = { scale = (scale + 0.4f).coerceAtMost(3.5f) }) {
-                                Icon(Icons.Default.ZoomIn, contentDescription = "Zoom in", tint = Color.White)
-                            }
-                            IconButton(onClick = { rotation = (rotation + 90f) % 360f }) {
-                                Icon(Icons.Default.RotateRight, contentDescription = "Rotate view", tint = Color.White)
+                            if (previewBitmap != null) {
+                                IconButton(onClick = { scale = (scale + 0.4f).coerceAtMost(3.5f) }) {
+                                    Icon(Icons.Default.ZoomIn, contentDescription = "Zoom in", tint = Color.White)
+                                }
+                                IconButton(onClick = { rotation = (rotation + 90f) % 360f }) {
+                                    Icon(Icons.Default.RotateRight, contentDescription = "Rotate view", tint = Color.White)
+                                }
                             }
                             IconButton(onClick = { showFullViewer = false }) {
                                 Icon(Icons.Default.Close, contentDescription = "Close viewer", tint = Color.White)
@@ -623,42 +893,58 @@ fun DocumentDetailScreen(
                         }
                     }
 
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth()
-                            .pointerInput(Unit) {
-                                detectTransformGestures { _, pan, zoom, _ ->
-                                    scale = (scale * zoom).coerceIn(1f, 4f)
-                                    offsetX += pan.x
-                                    offsetY += pan.y
-                                }
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
+                    val fullBmp = previewBitmap
+                    val fullText = extractedTextPreview
+                    if (fullBmp != null) {
                         Box(
                             modifier = Modifier
-                                .padding(16.dp)
-                                .graphicsLayer(
-                                    scaleX = scale,
-                                    scaleY = scale,
-                                    rotationZ = rotation,
-                                    translationX = offsetX,
-                                    translationY = offsetY
-                                )
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .pointerInput(Unit) {
+                                    detectTransformGestures { _, pan, zoom, _ ->
+                                        scale = (scale * zoom).coerceIn(1f, 4f)
+                                        offsetX += pan.x
+                                        offsetY += pan.y
+                                    }
+                                },
+                            contentAlignment = Alignment.Center
                         ) {
-                            val bmp = previewBitmap
-                            if (bmp != null) {
-                                Image(
-                                    bitmap = bmp.asImageBitmap(),
-                                    contentDescription = doc.title,
-                                    contentScale = ContentScale.Fit,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                            } else {
-                                MockupNationalIdCardVisual(
-                                    document = doc,
-                                    holderName = fields.find { it.label.contains("Name", ignoreCase = true) }?.value ?: "Rahul Shah"
+                            Image(
+                                bitmap = fullBmp.asImageBitmap(),
+                                contentDescription = doc.title,
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp)
+                                    .graphicsLayer(
+                                        scaleX = scale,
+                                        scaleY = scale,
+                                        rotationZ = rotation,
+                                        translationX = offsetX,
+                                        translationY = offsetY
+                                    )
+                            )
+                        }
+                    } else if (!fullText.isNullOrBlank()) {
+                        Surface(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            color = Color(0xFF1C1E2B)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .padding(16.dp)
+                                    .verticalScroll(rememberScrollState())
+                            ) {
+                                Text(
+                                    text = fullText,
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = Color(0xFFF3EFE6)
                                 )
                             }
                         }
@@ -668,16 +954,94 @@ fun DocumentDetailScreen(
         }
     }
 
-    // Sensitive Share Warning Dialog required by Section 6 of PRD
+    // Rename Dialog
+    if (showRenameDialog) {
+        AlertDialog(
+            onDismissRequest = { showRenameDialog = false },
+            containerColor = palette.surface,
+            title = { Text("Rename Document") },
+            text = {
+                OutlinedTextField(
+                    value = renameInput,
+                    onValueChange = { renameInput = it },
+                    label = { Text("Document Title") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (renameInput.isNotBlank()) {
+                            onRenameDocument(doc, renameInput)
+                            showRenameDialog = false
+                        }
+                    }
+                ) {
+                    Text("Save", color = palette.primary, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRenameDialog = false }) {
+                    Text("Cancel", color = palette.inkMuted)
+                }
+            }
+        )
+    }
+
+    // Move Category Dialog
+    if (showMoveCategoryDialog) {
+        AlertDialog(
+            onDismissRequest = { showMoveCategoryDialog = false },
+            containerColor = palette.surface,
+            title = { Text("Move \"${doc.title}\" To Category") },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(280.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    allCategories.forEach { cat ->
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (doc.category.equals(cat, ignoreCase = true)) palette.successContainer else palette.canvas,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    showMoveCategoryDialog = false
+                                    onMoveCategory(doc, cat)
+                                }
+                        ) {
+                            Text(
+                                text = cat,
+                                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                                color = palette.ink,
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showMoveCategoryDialog = false }) {
+                    Text("Cancel", color = palette.inkMuted)
+                }
+            }
+        )
+    }
+
+    // Sensitive Share Warning Dialog
     if (showShareWarning) {
-        val context = LocalContext.current
         AlertDialog(
             onDismissRequest = { showShareWarning = false },
             containerColor = palette.surface,
-            title = { Text("Share Sensitive Document?") },
+            title = { Text("Share or Export Document?") },
             text = {
                 Text(
-                    "Sharing exports unencrypted text or document files outside SAFEAREA. Make sure you trust the recipient app."
+                    "Sharing exports decrypted text or document files outside SAFEAREA. Make sure you trust the recipient application."
                 )
             },
             confirmButton = {
@@ -698,7 +1062,7 @@ fun DocumentDetailScreen(
         )
     }
 
-    // Explicit Delete Confirmation Dialog required by Section 13 of PRD
+    // Explicit Delete Confirmation Dialog
     if (showDeleteConfirm) {
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = false },
@@ -706,7 +1070,7 @@ fun DocumentDetailScreen(
             title = { Text("Delete \"${doc.title}\"?") },
             text = {
                 Text(
-                    "This will permanently delete \"${doc.title}\", its structured fields, encrypted scan files, and expiry reminders from your device."
+                    "This will permanently delete \"${doc.title}\", its structured fields, encrypted files, and expiry reminders from your device."
                 )
             },
             confirmButton = {
@@ -732,201 +1096,4 @@ private fun maskSensitiveValue(raw: String): String {
     if (raw.length <= 4) return "••••"
     val visibleSuffix = raw.takeLast(4)
     return "••••••$visibleSuffix"
-}
-
-/**
- * Custom Canvas & Compose reproduction of the National ID Card shown in Screen 4 of the SAFEAREA mockup:
- * Light icy-blue card with Himalayan peaks, Government of Nepal header, crimson double-pennant flag,
- * avatar silhouette, data bars, signature ("Rahul"), and gold smart-card chip.
- */
-@Composable
-fun MockupNationalIdCardVisual(
-    document: DocumentEntity,
-    holderName: String,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(205.dp),
-        shape = RoundedCornerShape(18.dp),
-        border = BorderStroke(1.2.dp, Color(0xFFB5C4D8)),
-        shadowElevation = 3.dp
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.linearGradient(
-                        colors = listOf(
-                            Color(0xFFDCE7F5),
-                            Color(0xFFEAF1F9),
-                            Color(0xFFD3E1F2)
-                        )
-                    )
-                )
-        ) {
-            // Subtle Himalayan mountain silhouette + emblem + flag + chip in Canvas
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val w = size.width
-                val h = size.height
-
-                // White mountain peak silhouette on right half
-                val mountainPath = Path().apply {
-                    moveTo(w * 0.38f, h)
-                    lineTo(w * 0.62f, h * 0.42f)
-                    lineTo(w * 0.72f, h * 0.56f)
-                    lineTo(w * 0.84f, h * 0.34f)
-                    lineTo(w, h * 0.60f)
-                    lineTo(w, h)
-                    close()
-                }
-                drawPath(mountainPath, color = Color.White.copy(alpha = 0.55f))
-
-                // Top-left circular national emblem
-                val emblemCx = w * 0.11f
-                val emblemCy = h * 0.20f
-                val emblemR = h * 0.11f
-                drawCircle(
-                    color = Color(0xFFB8293D),
-                    radius = emblemR,
-                    center = Offset(emblemCx, emblemCy),
-                    style = Stroke(width = 4f)
-                )
-                drawCircle(
-                    color = Color(0xFF2E5C9A),
-                    radius = emblemR * 0.68f,
-                    center = Offset(emblemCx, emblemCy)
-                )
-
-                // Top-right Nepal double-pennant flag
-                val flagLeft = w * 0.85f
-                val flagTop = h * 0.10f
-                val flagW = w * 0.08f
-                val flagH = h * 0.22f
-                val flagPath = Path().apply {
-                    moveTo(flagLeft, flagTop)
-                    lineTo(flagLeft + flagW, flagTop + flagH * 0.45f)
-                    lineTo(flagLeft + flagW * 0.35f, flagTop + flagH * 0.45f)
-                    lineTo(flagLeft + flagW, flagTop + flagH)
-                    lineTo(flagLeft, flagTop + flagH)
-                    close()
-                }
-                drawPath(flagPath, color = Color(0xFFD5104B))
-                drawPath(flagPath, color = Color(0xFF171431), style = Stroke(width = 3f))
-
-                // Avatar portrait box at bottom-left
-                val avLeft = w * 0.06f
-                val avTop = h * 0.40f
-                val avW = w * 0.26f
-                val avH = h * 0.48f
-                drawRoundRect(
-                    color = Color(0xFFE7EEF7),
-                    topLeft = Offset(avLeft, avTop),
-                    size = Size(avW, avH),
-                    cornerRadius = CornerRadius(12f, 12f)
-                )
-                // Head & shoulders silhouette inside avatar box
-                val headCenter = Offset(avLeft + avW * 0.5f, avTop + avH * 0.38f)
-                drawCircle(
-                    color = Color(0xFF495468),
-                    radius = avW * 0.22f,
-                    center = headCenter
-                )
-                drawArc(
-                    color = Color(0xFF495468),
-                    startAngle = 180f,
-                    sweepAngle = 180f,
-                    useCenter = true,
-                    topLeft = Offset(avLeft + avW * 0.12f, avTop + avH * 0.62f),
-                    size = Size(avW * 0.76f, avH * 0.65f)
-                )
-
-                // Placeholder text bars in middle-right
-                val barLeft = w * 0.37f
-                drawRoundRect(
-                    color = Color(0xFFAEC0D6),
-                    topLeft = Offset(barLeft, h * 0.44f),
-                    size = Size(w * 0.34f, 12f),
-                    cornerRadius = CornerRadius(6f, 6f)
-                )
-                drawRoundRect(
-                    color = Color(0xFFBCCCE0),
-                    topLeft = Offset(barLeft, h * 0.55f),
-                    size = Size(w * 0.25f, 11f),
-                    cornerRadius = CornerRadius(5f, 5f)
-                )
-                drawRoundRect(
-                    color = Color(0xFFBCCCE0),
-                    topLeft = Offset(barLeft, h * 0.65f),
-                    size = Size(w * 0.30f, 11f),
-                    cornerRadius = CornerRadius(5f, 5f)
-                )
-
-                // Gold IC Chip at bottom-right matching Screen 4 of mockup
-                val chipLeft = w * 0.82f
-                val chipTop = h * 0.72f
-                val chipW = w * 0.11f
-                val chipH = h * 0.16f
-                drawRoundRect(
-                    color = Color(0xFFE5BA63),
-                    topLeft = Offset(chipLeft, chipTop),
-                    size = Size(chipW, chipH),
-                    cornerRadius = CornerRadius(8f, 8f)
-                )
-                drawRoundRect(
-                    color = Color(0xFFB58932),
-                    topLeft = Offset(chipLeft, chipTop),
-                    size = Size(chipW, chipH),
-                    cornerRadius = CornerRadius(8f, 8f),
-                    style = Stroke(width = 2f)
-                )
-            }
-
-            // Header text at top center
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 14.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(
-                    text = document.issuer.ifBlank { "GOVERNMENT OF NEPAL" }.uppercase(),
-                    style = MaterialTheme.typography.labelMedium.copy(
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 10.sp,
-                        letterSpacing = 0.6.sp
-                    ),
-                    color = Color(0xFF171431)
-                )
-                Text(
-                    text = if (document.title.equals("National ID", ignoreCase = true)) {
-                        "NATIONAL ID CARD"
-                    } else {
-                        document.title.uppercase()
-                    },
-                    style = MaterialTheme.typography.titleSmall.copy(
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 13.sp,
-                        letterSpacing = 0.5.sp
-                    ),
-                    color = Color(0xFF171431)
-                )
-            }
-
-            // Signature style text at bottom-right next to chip
-            Text(
-                text = holderName.substringBefore(" "),
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontFamily = FontFamily.Serif,
-                    fontStyle = FontStyle.Italic,
-                    fontWeight = FontWeight.Medium
-                ),
-                color = Color(0xFF171431),
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 78.dp, bottom = 18.dp)
-            )
-        }
-    }
 }

@@ -18,12 +18,13 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.AuditEventEntity
 import com.example.data.CryptoStorageManager
 import com.example.data.DEFAULT_CATEGORIES
+import com.example.data.DocumentCategoryGroup
 import com.example.data.DocumentEntity
 import com.example.data.DocumentFieldEntity
-import com.example.data.DocumentIconType
 import com.example.data.DocumentWithFields
 import com.example.data.FieldSource
 import com.example.data.LockMethod
+import com.example.data.SupportedFileFormatGroup
 import com.example.data.VaultDatabase
 import com.example.data.VaultRepository
 import com.example.ui.theme.AppearanceMode
@@ -57,9 +58,18 @@ enum class SafeAreaScreen {
 }
 
 enum class SortOption(val label: String) {
-    RECENT("Recently Updated"),
-    TITLE("Title (A–Z)"),
-    EXPIRY("Expiry Date")
+    MODIFIED_DATE("Modified Date"),
+    ADDED_DATE("Date Added"),
+    TITLE("Name (A–Z)"),
+    FILE_SIZE("File Size"),
+    EXPIRY_DATE("Expiry Date")
+}
+
+enum class ExpiryFilter(val label: String) {
+    ALL("All Expiry"),
+    ACTIVE("Valid / Active"),
+    EXPIRING_SOON("Expiring Soon"),
+    EXPIRED("Expired")
 }
 
 data class VaultUiState(
@@ -86,11 +96,14 @@ data class VaultUiState(
     val isOcrReviewMode: Boolean = false,
     val searchQuery: String = "",
     val selectedCategory: String = "All",
+    val selectedFormatGroup: SupportedFileFormatGroup = SupportedFileFormatGroup.ALL,
+    val expiryFilter: ExpiryFilter = ExpiryFilter.ALL,
     val filterFavouritesOnly: Boolean = false,
-    val filterExpiringOnly: Boolean = false,
+    val filterRecentlyOpenedOnly: Boolean = false,
     val filterArchivedOnly: Boolean = false,
-    val sortOption: SortOption = SortOption.RECENT,
+    val sortOption: SortOption = SortOption.MODIFIED_DATE,
     val isGridView: Boolean = false,
+    val selectedBulkDocIds: Set<Long> = emptySet(),
     val customCategories: List<String> = emptyList(),
     val statusBannerMessage: String? = null,
     val clipboardClearCountdownSec: Int = 0,
@@ -99,10 +112,14 @@ data class VaultUiState(
     val useSystemFont: Boolean = false,
     val fontScale: Float = 1.0f,
     val grantedFolderUri: String = "",
-    val permissionsRefreshTick: Int = 0
+    val permissionsRefreshTick: Int = 0,
+    val isLoadingImport: Boolean = false
 ) {
     val allCategories: List<String>
         get() = (DEFAULT_CATEGORIES + customCategories).distinct()
+
+    val isBulkSelectionActive: Boolean
+        get() = selectedBulkDocIds.isNotEmpty()
 }
 
 class VaultViewModel(application: Application) : AndroidViewModel(application) {
@@ -129,6 +146,7 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
     val uiState: StateFlow<VaultUiState> = _uiState.asStateFlow()
 
     private var clipboardClearJob: Job? = null
+    private var statusDismissJob: Job? = null
     private var lockoutTimerJob: Job? = null
     private var inactivityJob: Job? = null
 
@@ -167,11 +185,10 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         viewModelScope.launch {
-            repository.ensureSeededSampleDocuments()
+            repository.purgeAnyDemoData()
             refreshStorageStats()
         }
 
-        // Start live minute-by-minute local clock ticker
         viewModelScope.launch {
             while (true) {
                 _uiState.update { it.copy(liveDateTimeText = computeLiveDateTime(getApplication())) }
@@ -194,7 +211,12 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onAppResumed() {
-        _uiState.update { it.copy(liveDateTimeText = computeLiveDateTime(getApplication())) }
+        _uiState.update {
+            it.copy(
+                liveDateTimeText = computeLiveDateTime(getApplication()),
+                permissionsRefreshTick = it.permissionsRefreshTick + 1
+            )
+        }
         refreshLockoutCountdown()
         resetInactivityTimer()
     }
@@ -234,7 +256,8 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
             state.copy(
                 currentScreen = target,
                 navigationStack = updatedStack,
-                unlockErrorMessage = null
+                unlockErrorMessage = null,
+                selectedBulkDocIds = if (target != SafeAreaScreen.DOCUMENTS) emptySet() else state.selectedBulkDocIds
             )
         }
         if (target == SafeAreaScreen.PROFILE || target == SafeAreaScreen.TOOLS) {
@@ -245,6 +268,10 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
     fun navigateBack(): Boolean {
         onUserInteraction()
         val current = _uiState.value
+        if (current.isBulkSelectionActive) {
+            clearBulkSelection()
+            return true
+        }
         if (current.isVaultLocked && current.currentScreen == SafeAreaScreen.UNLOCK) {
             return false
         }
@@ -267,6 +294,11 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun openDocumentDetails(documentId: Long) {
+        viewModelScope.launch {
+            documentsWithFields.value.find { it.document.id == documentId }?.let {
+                repository.markDocumentOpened(it.document)
+            }
+        }
         _uiState.update { it.copy(selectedDocumentId = documentId) }
         navigateTo(SafeAreaScreen.DOCUMENT_DETAIL)
     }
@@ -294,10 +326,10 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
                 biometricEnabled = enableBiometric,
                 hasPinSet = true,
                 currentScreen = SafeAreaScreen.HOME,
-                navigationStack = emptyList(),
-                statusBannerMessage = "Vault protection enabled"
+                navigationStack = emptyList()
             )
         }
+        showStatusMessage("Vault PIN protection enabled")
         viewModelScope.launch {
             repository.logAudit("SECURITY_ENABLED", "Configured PIN protection for SAFEAREA")
         }
@@ -328,10 +360,10 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
                 hasPatternSet = true,
                 hasPinSet = cryptoStorage.hasPinConfigured(),
                 currentScreen = SafeAreaScreen.HOME,
-                navigationStack = emptyList(),
-                statusBannerMessage = "Protected with pattern lock"
+                navigationStack = emptyList()
             )
         }
+        showStatusMessage("Pattern lock enabled")
         viewModelScope.launch {
             repository.logAudit("SECURITY_ENABLED", "Configured pattern lock for SAFEAREA")
         }
@@ -353,7 +385,7 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
 
     fun lockVaultNow() {
         if (!cryptoStorage.hasPinConfigured() && !cryptoStorage.hasPatternConfigured()) {
-            showStatusMessage("Set up a PIN or Pattern first to lock your vault.")
+            showStatusMessage("Configure a PIN or Pattern first to lock your vault.")
             navigateTo(SafeAreaScreen.SECURITY_SETUP)
             return
         }
@@ -412,10 +444,10 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
                 lockoutRemainingSeconds = 0,
                 unlockErrorMessage = null,
                 currentScreen = SafeAreaScreen.HOME,
-                navigationStack = emptyList(),
-                statusBannerMessage = "Vault unlocked ($methodUsed)"
+                navigationStack = emptyList()
             )
         }
+        showStatusMessage("Vault unlocked ($methodUsed)")
         viewModelScope.launch {
             repository.logAudit("VAULT_UNLOCKED", "Unlocked vault via $methodUsed")
         }
@@ -466,12 +498,8 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setUseSystemFont(enabled: Boolean) {
         cryptoStorage.useSystemFont = enabled
-        _uiState.update {
-            it.copy(
-                useSystemFont = enabled,
-                statusBannerMessage = if (enabled) "Switched to System Font" else "Switched to SAFEAREA Editorial Font"
-            )
-        }
+        _uiState.update { it.copy(useSystemFont = enabled) }
+        showStatusMessage(if (enabled) "Switched to System Font" else "Switched to Editorial Font")
     }
 
     fun setFontScale(scale: Float) {
@@ -485,23 +513,15 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update {
             it.copy(
                 grantedFolderUri = uriStr,
-                permissionsRefreshTick = it.permissionsRefreshTick + 1,
-                statusBannerMessage = "Granted full folder access for files & backups"
+                permissionsRefreshTick = it.permissionsRefreshTick + 1
             )
         }
+        showStatusMessage("Directory access saved")
     }
 
     fun onPermissionsResult(results: Map<String, Boolean>) {
-        val grantedCount = results.values.count { it }
         _uiState.update {
-            it.copy(
-                permissionsRefreshTick = it.permissionsRefreshTick + 1,
-                statusBannerMessage = if (results.isNotEmpty()) {
-                    "Permissions updated ($grantedCount/${results.size} granted)"
-                } else {
-                    it.statusBannerMessage
-                }
-            )
+            it.copy(permissionsRefreshTick = it.permissionsRefreshTick + 1)
         }
     }
 
@@ -543,15 +563,11 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
         if (trimmed.isEmpty()) return
         val updated = (_uiState.value.customCategories + trimmed).distinct()
         cryptoStorage.customCategoriesCsv = updated.joinToString(",")
-        _uiState.update {
-            it.copy(
-                customCategories = updated,
-                statusBannerMessage = "Added category \"$trimmed\""
-            )
-        }
+        _uiState.update { it.copy(customCategories = updated) }
+        showStatusMessage("Created category \"$trimmed\"")
     }
 
-    // --- Search & Filtering ---
+    // --- Search, Filtering, Sorting & Bulk Selection ---
 
     fun updateSearchQuery(query: String) {
         _uiState.update { it.copy(searchQuery = query) }
@@ -561,12 +577,20 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(selectedCategory = category) }
     }
 
+    fun selectFormatGroupFilter(group: SupportedFileFormatGroup) {
+        _uiState.update { it.copy(selectedFormatGroup = group) }
+    }
+
+    fun selectExpiryFilter(filter: ExpiryFilter) {
+        _uiState.update { it.copy(expiryFilter = filter) }
+    }
+
     fun toggleFavouritesFilter() {
         _uiState.update { it.copy(filterFavouritesOnly = !it.filterFavouritesOnly) }
     }
 
-    fun toggleExpiringFilter() {
-        _uiState.update { it.copy(filterExpiringOnly = !it.filterExpiringOnly) }
+    fun toggleRecentlyOpenedFilter() {
+        _uiState.update { it.copy(filterRecentlyOpenedOnly = !it.filterRecentlyOpenedOnly) }
     }
 
     fun toggleArchivedFilter() {
@@ -581,45 +605,91 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(isGridView = !it.isGridView) }
     }
 
-    // --- Document Add, Scan, Import, Edit, OCR Review ---
+    fun toggleBulkDocumentSelection(docId: Long) {
+        _uiState.update { state ->
+            val next = state.selectedBulkDocIds.toMutableSet()
+            if (!next.add(docId)) next.remove(docId)
+            state.copy(selectedBulkDocIds = next)
+        }
+    }
+
+    fun selectAllVisibleDocuments(docIds: List<Long>) {
+        _uiState.update { it.copy(selectedBulkDocIds = docIds.toSet()) }
+    }
+
+    fun clearBulkSelection() {
+        _uiState.update { it.copy(selectedBulkDocIds = emptySet()) }
+    }
+
+    fun bulkDeleteSelectedDocuments() {
+        val ids = _uiState.value.selectedBulkDocIds
+        if (ids.isEmpty()) return
+        val targets = documentsWithFields.value.map { it.document }.filter { it.id in ids }
+        viewModelScope.launch {
+            repository.bulkDeleteDocuments(targets)
+            clearBulkSelection()
+            showStatusMessage("Deleted ${targets.size} document(s)")
+            refreshStorageStats()
+        }
+    }
+
+    fun bulkArchiveSelectedDocuments(archive: Boolean) {
+        val ids = _uiState.value.selectedBulkDocIds
+        if (ids.isEmpty()) return
+        val targets = documentsWithFields.value.map { it.document }.filter { it.id in ids }
+        viewModelScope.launch {
+            repository.bulkArchiveDocuments(targets, archive)
+            clearBulkSelection()
+            showStatusMessage("${if (archive) "Archived" else "Restored"} ${targets.size} document(s)")
+        }
+    }
+
+    fun bulkMoveCategorySelectedDocuments(targetCategory: String) {
+        val ids = _uiState.value.selectedBulkDocIds
+        if (ids.isEmpty()) return
+        val targets = documentsWithFields.value.map { it.document }.filter { it.id in ids }
+        viewModelScope.launch {
+            repository.bulkMoveCategory(targets, targetCategory)
+            clearBulkSelection()
+            showStatusMessage("Moved ${targets.size} document(s) to $targetCategory")
+        }
+    }
+
+    // --- Document Add, Scan, Import, Edit, Duplicate, Rename ---
 
     fun startManualAddDocument(
-        presetTitle: String = "",
-        presetCategory: String = "Identity"
+        presetCategory: String = DocumentCategoryGroup.PERSONAL.title,
+        presetSubtype: String = ""
     ) {
+        val defaultGroup = DocumentCategoryGroup.fromCategoryName(presetCategory)
+        val subtype = presetSubtype.ifBlank { defaultGroup.subtypes.firstOrNull().orEmpty() }
         val defaultFields = listOf(
             DocumentFieldEntity(
                 documentId = 0L,
-                label = "Name",
-                value = "",
-                iconKey = "person",
-                sortOrder = 1
-            ),
-            DocumentFieldEntity(
-                documentId = 0L,
-                label = "DOB",
-                value = "",
-                iconKey = "calendar",
-                sortOrder = 2
-            ),
-            DocumentFieldEntity(
-                documentId = 0L,
-                label = "ID No.",
+                label = "Document Number / ID",
                 value = "",
                 isSensitive = true,
                 isMaskedByDefault = true,
                 iconKey = "id",
-                sortOrder = 3
+                sortOrder = 1
+            ),
+            DocumentFieldEntity(
+                documentId = 0L,
+                label = "Holder / Owner Name",
+                value = "",
+                iconKey = "person",
+                sortOrder = 2
             )
         )
         _uiState.update {
             it.copy(
                 editingDocument = DocumentEntity(
-                    title = presetTitle,
+                    title = subtype,
                     category = presetCategory,
+                    documentSubtype = subtype,
                     issuer = "",
-                    country = "Nepal",
-                    iconTypeName = iconForCategory(presetCategory).name
+                    country = "",
+                    iconTypeName = defaultGroup.name
                 ),
                 editingFields = defaultFields,
                 isOcrReviewMode = false
@@ -632,73 +702,92 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update {
             it.copy(
                 editingDocument = docWithFields.document,
-                editingFields = docWithFields.fields.ifEmpty {
-                    listOf(
-                        DocumentFieldEntity(
-                            documentId = docWithFields.document.id,
-                            label = "Name",
-                            value = "",
-                            iconKey = "person"
-                        )
-                    )
-                },
+                editingFields = docWithFields.fields,
                 isOcrReviewMode = false
             )
         }
         navigateTo(SafeAreaScreen.DOCUMENT_EDITOR)
     }
 
+    fun duplicateDocument(docWithFields: DocumentWithFields) {
+        viewModelScope.launch {
+            val newId = repository.duplicateDocument(docWithFields)
+            showStatusMessage("Duplicated \"${docWithFields.document.title}\"")
+            openDocumentDetails(newId)
+            refreshStorageStats()
+        }
+    }
+
+    fun renameDocument(doc: DocumentEntity, newTitle: String) {
+        viewModelScope.launch {
+            repository.renameDocument(doc, newTitle)
+            showStatusMessage("Renamed to \"${newTitle.trim()}\"")
+        }
+    }
+
+    fun moveDocumentCategory(doc: DocumentEntity, newCategory: String, newSubtype: String = "") {
+        viewModelScope.launch {
+            repository.moveDocumentCategory(doc, newCategory, newSubtype)
+            showStatusMessage("Moved to $newCategory")
+        }
+    }
+
     fun importDocumentFromUri(uri: Uri, isBackSide: Boolean = false) {
         viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingImport = true) }
             val result = repository.importUriToEncryptedVault(uri, if (isBackSide) "back" else "front")
+            _uiState.update { it.copy(isLoadingImport = false) }
+
             result.onSuccess { asset ->
                 val currentEditing = _uiState.value.editingDocument
                 if (currentEditing != null && _uiState.value.currentScreen == SafeAreaScreen.DOCUMENT_EDITOR) {
                     val updatedDoc = if (isBackSide) {
                         currentEditing.copy(
                             backFileRef = asset.fileRef,
-                            pageCount = 2
+                            pageCount = (currentEditing.pageCount + asset.pageCount).coerceAtLeast(2)
                         )
                     } else {
                         currentEditing.copy(
                             frontFileRef = asset.fileRef,
+                            originalFileName = asset.originalName,
+                            fileExtension = asset.fileExtension,
                             mimeType = asset.mimeType,
                             fileSize = asset.fileSize,
+                            pageCount = asset.pageCount,
                             title = currentEditing.title.ifBlank {
                                 asset.originalName.substringBeforeLast(".").replace("_", " ")
                             }
                         )
                     }
                     _uiState.update {
-                        it.copy(
-                            editingDocument = updatedDoc,
-                            statusBannerMessage = "Encrypted & attached ${asset.originalName}"
-                        )
+                        it.copy(editingDocument = updatedDoc)
                     }
+                    showStatusMessage("Attached ${asset.originalName}")
                 } else {
                     val cleanTitle = asset.originalName.substringBeforeLast(".")
                         .replace("_", " ")
                         .replaceFirstChar { c -> c.uppercase() }
-                    val ocrFields = repository.extractOcrSuggestions(cleanTitle, "Identity")
                     val draftDoc = DocumentEntity(
                         title = cleanTitle,
-                        category = if (asset.isPdf) "Education" else "Identity",
-                        issuer = "Imported Document",
-                        country = "Nepal",
+                        category = asset.suggestedCategory,
+                        documentSubtype = asset.suggestedSubtype,
+                        originalFileName = asset.originalName,
+                        fileExtension = asset.fileExtension,
                         frontFileRef = asset.fileRef,
                         mimeType = asset.mimeType,
                         fileSize = asset.fileSize,
-                        iconTypeName = if (asset.isPdf) DocumentIconType.EDUCATION.name else DocumentIconType.NATIONAL_ID.name,
+                        pageCount = asset.pageCount,
+                        iconTypeName = DocumentCategoryGroup.fromCategoryName(asset.suggestedCategory).name,
                         isSamplePlaceholder = false
                     )
                     _uiState.update {
                         it.copy(
                             editingDocument = draftDoc,
-                            editingFields = ocrFields,
-                            isOcrReviewMode = true,
-                            statusBannerMessage = "File imported. Review extracted fields before saving."
+                            editingFields = asset.extractedFields,
+                            isOcrReviewMode = asset.extractedFields.any { f -> !f.userConfirmed }
                         )
                     }
+                    showStatusMessage("Imported ${asset.originalName} (${asset.fileExtension.uppercase(Locale.ROOT)})")
                     navigateTo(SafeAreaScreen.DOCUMENT_EDITOR)
                 }
                 refreshStorageStats()
@@ -713,31 +802,54 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
         backBitmap: Bitmap?,
         titleHint: String,
         categoryHint: String,
+        subtypeHint: String,
         rawOcrText: String
     ) {
         viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingImport = true) }
             val frontRes = repository.saveBitmapToEncryptedVault(frontBitmap, "scan_front")
             val backRes = backBitmap?.let { repository.saveBitmapToEncryptedVault(it, "scan_back") }
+            _uiState.update { it.copy(isLoadingImport = false) }
 
             val frontInfo = frontRes.getOrNull()
             if (frontInfo == null) {
-                showStatusMessage("Failed to encrypt captured scan.")
+                showStatusMessage("Failed to save captured camera scan.")
                 return@launch
             }
             val backInfo = backRes?.getOrNull()
-            val ocrFields = repository.extractOcrSuggestions(titleHint, categoryHint, rawOcrText)
+
+            val parsedKeyValues = repository.parseKeyValueLinesFromText(rawOcrText)
+            val ocrFields = mutableListOf<DocumentFieldEntity>()
+            ocrFields.addAll(frontInfo.extractedFields)
+            parsedKeyValues.forEachIndexed { idx, (k, v) ->
+                val isId = k.contains("no", ignoreCase = true) || k.contains("id", ignoreCase = true)
+                ocrFields.add(
+                    DocumentFieldEntity(
+                        documentId = 0L,
+                        label = k,
+                        value = v,
+                        isSensitive = isId,
+                        isMaskedByDefault = isId,
+                        source = FieldSource.OCR.name,
+                        userConfirmed = false,
+                        iconKey = if (isId) "id" else "info",
+                        sortOrder = ocrFields.size + idx + 1
+                    )
+                )
+            }
 
             val draftDoc = DocumentEntity(
-                title = titleHint.ifBlank { "Scanned Document" },
+                title = titleHint.ifBlank { subtypeHint.ifBlank { "Scanned Document" } },
                 category = categoryHint,
-                issuer = "Scanned via SAFEAREA Camera",
-                country = "Nepal",
+                documentSubtype = subtypeHint,
+                originalFileName = frontInfo.originalName,
+                fileExtension = "jpg",
                 frontFileRef = frontInfo.fileRef,
                 backFileRef = backInfo?.fileRef ?: "",
                 mimeType = "image/jpeg",
                 fileSize = frontInfo.fileSize + (backInfo?.fileSize ?: 0L),
                 pageCount = if (backInfo != null) 2 else 1,
-                iconTypeName = iconForCategory(categoryHint).name,
+                iconTypeName = DocumentCategoryGroup.fromCategoryName(categoryHint).name,
                 isSamplePlaceholder = false
             )
 
@@ -745,10 +857,10 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
                 it.copy(
                     editingDocument = draftDoc,
                     editingFields = ocrFields,
-                    isOcrReviewMode = true,
-                    statusBannerMessage = "Scan captured. Please review & confirm OCR fields."
+                    isOcrReviewMode = ocrFields.any { f -> !f.userConfirmed }
                 )
             }
+            showStatusMessage("Camera scan saved. Complete document details below.")
             navigateTo(SafeAreaScreen.DOCUMENT_EDITOR)
             refreshStorageStats()
         }
@@ -766,8 +878,10 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
                 updatedFields
             }
             val finalDoc = updatedDoc.copy(
-                title = updatedDoc.title.trim().ifEmpty { "Untitled Document" },
-                iconTypeName = iconForCategory(updatedDoc.category).name,
+                title = updatedDoc.title.trim().ifEmpty {
+                    updatedDoc.documentSubtype.ifEmpty { "Untitled Document" }
+                },
+                iconTypeName = DocumentCategoryGroup.fromCategoryName(updatedDoc.category).name,
                 isSamplePlaceholder = false
             )
             val savedId = repository.saveDocumentWithFields(finalDoc, finalFields)
@@ -776,10 +890,10 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
                     selectedDocumentId = savedId,
                     editingDocument = null,
                     editingFields = emptyList(),
-                    isOcrReviewMode = false,
-                    statusBannerMessage = "Document saved to vault"
+                    isOcrReviewMode = false
                 )
             }
+            showStatusMessage("Saved \"${finalDoc.title}\"")
             navigateTo(SafeAreaScreen.DOCUMENT_DETAIL, clearBackStack = false)
             refreshStorageStats()
             if (_uiState.value.expiryNotificationsEnabled && finalDoc.expiryDate.isNotBlank()) {
@@ -791,7 +905,7 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
     fun confirmOcrFieldsForCurrentDocument(documentId: Long) {
         viewModelScope.launch {
             repository.confirmAllOcrFields(documentId)
-            showStatusMessage("All OCR fields confirmed")
+            showStatusMessage("Confirmed all extracted fields")
         }
     }
 
@@ -807,9 +921,9 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 val fields = documentsWithFields.value.find { it.document.id == doc.id }?.fields.orEmpty()
                 repository.saveDocumentWithFields(updated, fields)
-                showStatusMessage("Rotated image copy by 90°")
+                showStatusMessage("Rotated image by 90°")
             }.onFailure {
-                showStatusMessage("Unable to rotate attachment.")
+                showStatusMessage("Unable to rotate image attachment.")
             }
         }
     }
@@ -824,7 +938,7 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
     fun toggleArchive(doc: DocumentEntity) {
         viewModelScope.launch {
             repository.toggleArchive(doc)
-            showStatusMessage(if (!doc.archived) "Archived document" else "Restored from archive")
+            showStatusMessage(if (!doc.archived) "Archived \"${doc.title}\"" else "Restored \"${doc.title}\"")
         }
     }
 
@@ -846,12 +960,13 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboard.setPrimaryClip(ClipData.newPlainText(label, textToCopy))
 
+        statusDismissJob?.cancel()
         clipboardClearJob?.cancel()
         clipboardClearJob = viewModelScope.launch {
             var remaining = 30
             _uiState.update {
                 it.copy(
-                    statusBannerMessage = "Copied $label · Auto-clearing clipboard in 30s",
+                    statusBannerMessage = "Copied $label · Auto-clearing clipboard",
                     clipboardClearCountdownSec = remaining
                 )
             }
@@ -865,39 +980,67 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
             }
-            _uiState.update {
-                it.copy(
-                    clipboardClearCountdownSec = 0,
-                    statusBannerMessage = "Clipboard cleared for privacy"
-                )
-            }
+            _uiState.update { it.copy(clipboardClearCountdownSec = 0) }
+            showStatusMessage("Clipboard cleared for privacy")
         }
     }
 
     fun copyAllDocumentInfo(docWithFields: DocumentWithFields) {
+        val doc = docWithFields.document
         val sb = StringBuilder()
-        sb.appendLine("${docWithFields.document.title} (${docWithFields.document.country})")
-        if (docWithFields.document.issuer.isNotBlank()) {
-            sb.appendLine("Issuer: ${docWithFields.document.issuer}")
-        }
+        sb.appendLine(doc.title)
+        if (doc.documentSubtype.isNotBlank()) sb.appendLine("Type: ${doc.documentSubtype}")
+        sb.appendLine("Category: ${doc.category}")
+        if (doc.issuer.isNotBlank()) sb.appendLine("Issuer: ${doc.issuer}")
+        if (doc.country.isNotBlank()) sb.appendLine("Country/Region: ${doc.country}")
         docWithFields.fields.forEach { field ->
             sb.appendLine("${field.label}: ${field.value}")
         }
-        if (docWithFields.document.expiryDate.isNotBlank()) {
-            sb.appendLine("Expiry Date: ${docWithFields.document.expiryDate}")
-        }
-        copyTextToClipboard(docWithFields.document.title, sb.toString().trim())
+        if (doc.issueDate.isNotBlank()) sb.appendLine("Issue Date: ${doc.issueDate}")
+        if (doc.expiryDate.isNotBlank()) sb.appendLine("Expiry Date: ${doc.expiryDate}")
+        if (doc.notes.isNotBlank()) sb.appendLine("Notes: ${doc.notes}")
+        copyTextToClipboard(doc.title, sb.toString().trim())
     }
 
-    // --- Share & Secure Export ---
+    // --- Native Open in External Viewer & Share/Export ---
+
+    fun openDocumentInExternalViewer(context: Context, doc: DocumentEntity) {
+        if (doc.frontFileRef.isBlank()) {
+            showStatusMessage("No file attached to open externally.")
+            return
+        }
+        viewModelScope.launch {
+            val ext = doc.fileExtension.ifBlank { "bin" }
+            val tempFile = cryptoStorage.writeDecryptedTempFileForPreviewOrShare(doc.frontFileRef, ext)
+            if (tempFile == null) {
+                showStatusMessage("Unable to decrypt file for viewing.")
+                return@launch
+            }
+            val uri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                tempFile
+            )
+            val viewIntent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, doc.mimeType)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            runCatching {
+                context.startActivity(Intent.createChooser(viewIntent, "Open ${doc.title}").apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                })
+            }.onFailure {
+                showStatusMessage("No compatible external viewer app installed for .${ext} files.")
+            }
+        }
+    }
 
     fun shareDocumentSummaryOrFile(context: Context, docWithFields: DocumentWithFields, includeAttachment: Boolean) {
         viewModelScope.launch {
             val doc = docWithFields.document
             val textSummary = buildString {
-                appendLine("SAFEAREA Document Summary")
-                appendLine("Title: ${doc.title}")
-                appendLine("Category: ${doc.category} (${doc.country})")
+                appendLine(doc.title)
+                appendLine("Category: ${doc.category}${if (doc.documentSubtype.isNotBlank()) " · ${doc.documentSubtype}" else ""}")
                 docWithFields.fields.forEach { f ->
                     appendLine("${f.label}: ${f.value}")
                 }
@@ -913,7 +1056,9 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             if (includeAttachment && doc.frontFileRef.isNotBlank()) {
-                val ext = if (doc.mimeType.contains("pdf")) "pdf" else "jpg"
+                val ext = doc.fileExtension.ifBlank {
+                    if (doc.mimeType.contains("pdf")) "pdf" else "jpg"
+                }
                 val tempFile = cryptoStorage.writeDecryptedTempFileForPreviewOrShare(doc.frontFileRef, ext)
                 if (tempFile != null) {
                     val uri = FileProvider.getUriForFile(
@@ -931,7 +1076,7 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             runCatching { context.startActivity(chooser) }
-            repository.logAudit("DOCUMENT_SHARED", "User explicitly shared ${doc.title}")
+            repository.logAudit("DOCUMENT_SHARED", "Shared \"${doc.title}\"")
         }
     }
 
@@ -988,10 +1133,12 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
                     currentScreen = SafeAreaScreen.WELCOME,
                     selectedTheme = cryptoStorage.selectedTheme,
                     appearanceMode = cryptoStorage.appearanceMode,
-                    liveDateTimeText = computeLiveDateTime(getApplication()),
-                    statusBannerMessage = "All local vault data has been permanently deleted."
+                    useSystemFont = cryptoStorage.useSystemFont,
+                    fontScale = cryptoStorage.fontScale,
+                    liveDateTimeText = computeLiveDateTime(getApplication())
                 )
             }
+            showStatusMessage("All local vault data has been permanently deleted.")
         }
     }
 
@@ -1018,7 +1165,6 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
             manager.createNotificationChannel(channel)
         }
 
-        // Privacy rule (Section 11): Never expose document previews or OCR text in push notification content
         val notification = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(android.R.drawable.ic_lock_idle_lock)
             .setContentTitle("SAFEAREA Expiry Reminder")
@@ -1031,27 +1177,19 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun showStatusMessage(message: String) {
+        statusDismissJob?.cancel()
         _uiState.update { it.copy(statusBannerMessage = message) }
+        statusDismissJob = viewModelScope.launch {
+            delay(3200L)
+            if (_uiState.value.clipboardClearCountdownSec == 0) {
+                _uiState.update { it.copy(statusBannerMessage = null) }
+            }
+        }
     }
 
     fun clearStatusMessage() {
+        statusDismissJob?.cancel()
         _uiState.update { it.copy(statusBannerMessage = null) }
-    }
-
-    private fun iconForCategory(category: String): DocumentIconType {
-        val lower = category.lowercase(Locale.ROOT)
-        return when {
-            lower.contains("driv") || lower.contains("vehicle") -> DocumentIconType.DRIVING
-            lower.contains("citizen") -> DocumentIconType.CITIZENSHIP
-            lower.contains("identity") || lower.contains("national") -> DocumentIconType.NATIONAL_ID
-            lower.contains("travel") || lower.contains("passport") -> DocumentIconType.PASSPORT
-            lower.contains("educat") -> DocumentIconType.EDUCATION
-            lower.contains("financ") -> DocumentIconType.FINANCE
-            lower.contains("health") -> DocumentIconType.HEALTH
-            lower.contains("home") || lower.contains("address") -> DocumentIconType.ADDRESS
-            lower.contains("work") -> DocumentIconType.WORK
-            else -> DocumentIconType.OTHER
-        }
     }
 }
 
