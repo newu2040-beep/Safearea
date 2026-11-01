@@ -1,6 +1,8 @@
 package com.example.ui.theme
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 
 enum class VaultThemeId(
     val displayName: String,
@@ -21,6 +23,16 @@ enum class VaultThemeId(
         primaryHex = 0xFFD5104B,
         secondaryHex = 0xFF78A88F,
         borderHex = 0xFF171431
+    ),
+    APPLE_MINIMAL_SNOW(
+        displayName = "Apple Minimal Snow",
+        isDarkPreset = false,
+        canvasHex = 0xFFF5F5F7,
+        surfaceHex = 0xFFFFFFFF,
+        inkHex = 0xFF1D1D1F,
+        primaryHex = 0xFF0071E3,
+        secondaryHex = 0xFF34C759,
+        borderHex = 0xFF86868B
     ),
     MINT(
         displayName = "Mint",
@@ -52,6 +64,16 @@ enum class VaultThemeId(
         secondaryHex = 0xFFB9D2E8,
         borderHex = 0xFF162330
     ),
+    NORDIC_FROST(
+        displayName = "Nordic Frost",
+        isDarkPreset = false,
+        canvasHex = 0xFFECEFF4,
+        surfaceHex = 0xFFF9FBFD,
+        inkHex = 0xFF2E3440,
+        primaryHex = 0xFF5E81AC,
+        secondaryHex = 0xFF88C0D0,
+        borderHex = 0xFF4C566A
+    ),
     BLUSH(
         displayName = "Blush",
         isDarkPreset = false,
@@ -61,6 +83,16 @@ enum class VaultThemeId(
         primaryHex = 0xFFB94F68,
         secondaryHex = 0xFFE9C1C8,
         borderHex = 0xFF2B171B
+    ),
+    SAKURA_BLOSSOM(
+        displayName = "Sakura Blossom",
+        isDarkPreset = false,
+        canvasHex = 0xFFFDF0F5,
+        surfaceHex = 0xFFFFFBFC,
+        inkHex = 0xFF2F1824,
+        primaryHex = 0xFFD84A7E,
+        secondaryHex = 0xFFF2B5CB,
+        borderHex = 0xFF542D40
     ),
     BUTTER_LEMON(
         displayName = "Butter / Lemon",
@@ -92,6 +124,16 @@ enum class VaultThemeId(
         secondaryHex = 0xFFCFC1A9,
         borderHex = 0xFF241F19
     ),
+    OCEAN_BREEZE(
+        displayName = "Ocean Breeze",
+        isDarkPreset = false,
+        canvasHex = 0xFFE6F4F6,
+        surfaceHex = 0xFFF7FEFF,
+        inkHex = 0xFF102A32,
+        primaryHex = 0xFF00798C,
+        secondaryHex = 0xFF72C3D0,
+        borderHex = 0xFF1D4754
+    ),
     GRAPHITE_DARK(
         displayName = "Graphite Dark",
         isDarkPreset = true,
@@ -111,6 +153,46 @@ enum class VaultThemeId(
         primaryHex = 0xFFA9A2F0,
         secondaryHex = 0xFF8CC7B0,
         borderHex = 0xFF484D7A
+    ),
+    OLED_PITCH_BLACK(
+        displayName = "OLED Pitch Black",
+        isDarkPreset = true,
+        canvasHex = 0xFF000000,
+        surfaceHex = 0xFF121216,
+        inkHex = 0xFFF8F9FA,
+        primaryHex = 0xFF30D158,
+        secondaryHex = 0xFF0A84FF,
+        borderHex = 0xFF2C2C34
+    ),
+    EMERALD_FOREST_DARK(
+        displayName = "Emerald Forest",
+        isDarkPreset = true,
+        canvasHex = 0xFF0F1E19,
+        surfaceHex = 0xFF172C24,
+        inkHex = 0xFFEBF7F2,
+        primaryHex = 0xFF4BD09A,
+        secondaryHex = 0xFF8BD8B7,
+        borderHex = 0xFF2E5446
+    ),
+    ROYAL_GOLD_DARK(
+        displayName = "Royal Gold",
+        isDarkPreset = true,
+        canvasHex = 0xFF181512,
+        surfaceHex = 0xFF241F1A,
+        inkHex = 0xFFFAF3E8,
+        primaryHex = 0xFFE5B84B,
+        secondaryHex = 0xFFD49B54,
+        borderHex = 0xFF524433
+    ),
+    MOCHA_ESPRESSO_DARK(
+        displayName = "Mocha Espresso",
+        isDarkPreset = true,
+        canvasHex = 0xFF1E1B18,
+        surfaceHex = 0xFF2B2623,
+        inkHex = 0xFFF5EBE6,
+        primaryHex = 0xFFE08E6D,
+        secondaryHex = 0xFFB8A398,
+        borderHex = 0xFF524640
     )
 }
 
@@ -118,6 +200,25 @@ enum class AppearanceMode(val label: String) {
     SYSTEM("System"),
     LIGHT("Light"),
     DARK("Dark")
+}
+
+enum class CornerRadiusStyle(val label: String, val cardRadiusDp: Int, val buttonRadiusDp: Int) {
+    SHARP("Sharp (8dp)", 8, 12),
+    MODERN("Modern (14dp)", 14, 18),
+    APPLE_ROUNDED("Apple (20dp)", 20, 26),
+    PILL("Soft Pill (26dp)", 26, 30)
+}
+
+enum class CardDensityStyle(val label: String, val verticalPaddingDp: Int, val itemSpacingDp: Int) {
+    COMPACT("Compact", 9, 8),
+    COMFORTABLE("Comfortable", 13, 11),
+    SPACIOUS("Spacious", 17, 15)
+}
+
+enum class BorderContrastStyle(val label: String, val borderAlpha: Float, val borderWidthDp: Float) {
+    SUBTLE("Subtle", 0.16f, 0.8f),
+    STANDARD("Standard", 0.34f, 1.1f),
+    BOLD("High Contrast", 0.72f, 1.6f)
 }
 
 data class SafeAreaPalette(
@@ -135,10 +236,37 @@ data class SafeAreaPalette(
     val warningContainer: Color,
     val danger: Color,
     val border: Color,
-    val isDark: Boolean
-)
+    val isDark: Boolean,
+    val cornerStyle: CornerRadiusStyle = CornerRadiusStyle.APPLE_ROUNDED,
+    val densityStyle: CardDensityStyle = CardDensityStyle.COMFORTABLE,
+    val borderContrastStyle: BorderContrastStyle = BorderContrastStyle.STANDARD
+) {
+    val cardCornerRadius: Dp
+        get() = cornerStyle.cardRadiusDp.dp
 
-fun resolveSafeAreaPalette(theme: VaultThemeId, effectiveDark: Boolean): SafeAreaPalette {
+    val buttonCornerRadius: Dp
+        get() = cornerStyle.buttonRadiusDp.dp
+
+    val cardVerticalPadding: Dp
+        get() = densityStyle.verticalPaddingDp.dp
+
+    val itemSpacing: Dp
+        get() = densityStyle.itemSpacingDp.dp
+
+    val borderAlpha: Float
+        get() = borderContrastStyle.borderAlpha
+
+    val borderWidth: Dp
+        get() = borderContrastStyle.borderWidthDp.dp
+}
+
+fun resolveSafeAreaPalette(
+    theme: VaultThemeId,
+    effectiveDark: Boolean,
+    cornerStyle: CornerRadiusStyle = CornerRadiusStyle.APPLE_ROUNDED,
+    densityStyle: CardDensityStyle = CardDensityStyle.COMFORTABLE,
+    borderContrastStyle: BorderContrastStyle = BorderContrastStyle.STANDARD
+): SafeAreaPalette {
     val useDark = effectiveDark || theme.isDarkPreset
     return if (useDark) {
         val baseTheme = if (theme.isDarkPreset) theme else VaultThemeId.GRAPHITE_DARK
@@ -159,7 +287,10 @@ fun resolveSafeAreaPalette(theme: VaultThemeId, effectiveDark: Boolean): SafeAre
             warningContainer = Color(0xFF3E3218),
             danger = Color(0xFFFF6B81),
             border = Color(baseTheme.borderHex),
-            isDark = true
+            isDark = true,
+            cornerStyle = cornerStyle,
+            densityStyle = densityStyle,
+            borderContrastStyle = borderContrastStyle
         )
     } else {
         SafeAreaPalette(
@@ -177,7 +308,10 @@ fun resolveSafeAreaPalette(theme: VaultThemeId, effectiveDark: Boolean): SafeAre
             warningContainer = Color(0xFFFEF3D6),
             danger = Color(0xFFC91D42),
             border = Color(theme.borderHex),
-            isDark = false
+            isDark = false,
+            cornerStyle = cornerStyle,
+            densityStyle = densityStyle,
+            borderContrastStyle = borderContrastStyle
         )
     }
 }

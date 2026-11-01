@@ -19,6 +19,9 @@ fun SafeAreaTheme(
     appearanceMode: AppearanceMode = AppearanceMode.LIGHT,
     useSystemFont: Boolean = false,
     fontScale: Float = 1.0f,
+    cornerRadiusStyle: CornerRadiusStyle = CornerRadiusStyle.APPLE_ROUNDED,
+    cardDensityStyle: CardDensityStyle = CardDensityStyle.COMFORTABLE,
+    borderContrastStyle: BorderContrastStyle = BorderContrastStyle.STANDARD,
     content: @Composable () -> Unit
 ) {
     val systemDark = isSystemInDarkTheme()
@@ -27,7 +30,13 @@ fun SafeAreaTheme(
         AppearanceMode.DARK -> true
         AppearanceMode.SYSTEM -> systemDark
     }
-    val palette = resolveSafeAreaPalette(themeId, effectiveDark)
+    val palette = resolveSafeAreaPalette(
+        theme = themeId,
+        effectiveDark = effectiveDark,
+        cornerStyle = cornerRadiusStyle,
+        densityStyle = cardDensityStyle,
+        borderContrastStyle = borderContrastStyle
+    )
     val typography = remember(useSystemFont, fontScale) {
         buildSafeAreaTypography(useSystemFont = useSystemFont, fontScale = fontScale)
     }

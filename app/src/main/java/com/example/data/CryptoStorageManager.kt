@@ -6,6 +6,9 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import com.example.ui.theme.AppearanceMode
+import com.example.ui.theme.BorderContrastStyle
+import com.example.ui.theme.CardDensityStyle
+import com.example.ui.theme.CornerRadiusStyle
 import com.example.ui.theme.VaultThemeId
 import java.io.File
 import java.security.KeyStore
@@ -21,7 +24,7 @@ import javax.crypto.spec.SecretKeySpec
 
 /**
  * Handles:
- * 1. Non-sensitive settings persistence (theme, appearance mode, auto-lock timeout, onboarding state).
+ * 1. Non-sensitive settings & UI customization persistence (theme, appearance mode, corner radius, density, border contrast, custom vault title/tagline, Emergency ICE profile).
  * 2. PBKDF2WithHmacSHA256 credential derivation for PIN & Pattern (never stores plain-text PINs or patterns).
  * 3. Exponential rate-limiting on failed unlock attempts.
  * 4. AES-256-GCM file encryption & decryption backed by Android Keystore (with fallback key for JVM/Robolectric tests).
@@ -34,7 +37,7 @@ class CryptoStorageManager(private val context: Context) {
     private val vaultDir: File
         get() = File(context.filesDir, "vault").apply { if (!exists()) mkdirs() }
 
-    private val exportCacheDir: File
+    val exportCacheDir: File
         get() = File(context.cacheDir, "exports").apply { if (!exists()) mkdirs() }
 
     companion object {
@@ -45,7 +48,7 @@ class CryptoStorageManager(private val context: Context) {
         private const val PBKDF2_KEY_BITS = 256
     }
 
-    // --- Settings & Preferences ---
+    // --- Settings & UI Customization Preferences ---
 
     var onboardingComplete: Boolean
         get() = prefs.getBoolean("onboarding_complete", false)
@@ -79,6 +82,70 @@ class CryptoStorageManager(private val context: Context) {
             return runCatching { AppearanceMode.valueOf(raw) }.getOrDefault(AppearanceMode.LIGHT)
         }
         set(value) = prefs.edit().putString("appearance_mode", value.name).apply()
+
+    var cornerRadiusStyle: CornerRadiusStyle
+        get() {
+            val raw = prefs.getString("corner_radius_style", CornerRadiusStyle.APPLE_ROUNDED.name)
+                ?: CornerRadiusStyle.APPLE_ROUNDED.name
+            return runCatching { CornerRadiusStyle.valueOf(raw) }.getOrDefault(CornerRadiusStyle.APPLE_ROUNDED)
+        }
+        set(value) = prefs.edit().putString("corner_radius_style", value.name).apply()
+
+    var cardDensityStyle: CardDensityStyle
+        get() {
+            val raw = prefs.getString("card_density_style", CardDensityStyle.COMFORTABLE.name)
+                ?: CardDensityStyle.COMFORTABLE.name
+            return runCatching { CardDensityStyle.valueOf(raw) }.getOrDefault(CardDensityStyle.COMFORTABLE)
+        }
+        set(value) = prefs.edit().putString("card_density_style", value.name).apply()
+
+    var borderContrastStyle: BorderContrastStyle
+        get() {
+            val raw = prefs.getString("border_contrast_style", BorderContrastStyle.STANDARD.name)
+                ?: BorderContrastStyle.STANDARD.name
+            return runCatching { BorderContrastStyle.valueOf(raw) }.getOrDefault(BorderContrastStyle.STANDARD)
+        }
+        set(value) = prefs.edit().putString("border_contrast_style", value.name).apply()
+
+    var customVaultTitle: String
+        get() = prefs.getString("custom_vault_title", "SAFEAREA")?.ifBlank { "SAFEAREA" } ?: "SAFEAREA"
+        set(value) = prefs.edit().putString("custom_vault_title", value.trim().ifBlank { "SAFEAREA" }).apply()
+
+    var customVaultTagline: String
+        get() = prefs.getString("custom_vault_tagline", "Personal Document Vault")
+            ?.ifBlank { "Personal Document Vault" } ?: "Personal Document Vault"
+        set(value) = prefs.edit().putString(
+            "custom_vault_tagline",
+            value.trim().ifBlank { "Personal Document Vault" }
+        ).apply()
+
+    var showSecurityScoreCard: Boolean
+        get() = prefs.getBoolean("show_security_score_card", true)
+        set(value) = prefs.edit().putBoolean("show_security_score_card", value).apply()
+
+    var showCategoryGridOnHome: Boolean
+        get() = prefs.getBoolean("show_category_grid_on_home", true)
+        set(value) = prefs.edit().putBoolean("show_category_grid_on_home", value).apply()
+
+    var emergencyIceProfile: EmergencyIceProfile
+        get() = EmergencyIceProfile(
+            fullName = prefs.getString("ice_full_name", "") ?: "",
+            bloodGroup = prefs.getString("ice_blood_group", "") ?: "",
+            allergies = prefs.getString("ice_allergies", "") ?: "",
+            emergencyContact = prefs.getString("ice_emergency_contact", "") ?: "",
+            medicalConditions = prefs.getString("ice_medical_conditions", "") ?: "",
+            insurancePolicyNo = prefs.getString("ice_insurance_policy", "") ?: ""
+        )
+        set(value) {
+            prefs.edit()
+                .putString("ice_full_name", value.fullName.trim())
+                .putString("ice_blood_group", value.bloodGroup.trim())
+                .putString("ice_allergies", value.allergies.trim())
+                .putString("ice_emergency_contact", value.emergencyContact.trim())
+                .putString("ice_medical_conditions", value.medicalConditions.trim())
+                .putString("ice_insurance_policy", value.insurancePolicyNo.trim())
+                .apply()
+        }
 
     var autoLockTimeoutSeconds: Int
         get() = prefs.getInt("auto_lock_timeout_sec", 60) // Default 1 minute
@@ -115,6 +182,14 @@ class CryptoStorageManager(private val context: Context) {
     var grantedFolderUri: String
         get() = prefs.getString("granted_folder_uri", "") ?: ""
         set(value) = prefs.edit().putString("granted_folder_uri", value).apply()
+
+    /**
+     * Creates a writable file inside `cacheDir/exports` for `ActivityResultContracts.TakePicture()`
+     * so the device's native Android camera app can write full-resolution photos via `FileProvider`.
+     */
+    fun createTempCameraCaptureFile(prefix: String = "camera_capture"): File {
+        return File(exportCacheDir, "${prefix}_${System.currentTimeMillis()}.jpg")
+    }
 
     // --- Credential Derivation (PBKDF2WithHmacSHA256) ---
 

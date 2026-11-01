@@ -1,33 +1,23 @@
 package com.example.ui.screens
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas as AndroidCanvas
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
-import android.graphics.ImageFormat
 import android.graphics.Matrix
 import android.graphics.Paint
-import android.graphics.Rect
-import android.graphics.YuvImage
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.ImageCapture
-import androidx.camera.core.ImageCaptureException
-import androidx.camera.core.ImageProxy
-import androidx.camera.core.Preview
-import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.view.PreviewView
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -58,10 +48,8 @@ import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.FlashOff
-import androidx.compose.material.icons.filled.FlashOn
-import androidx.compose.material.icons.filled.FlipCameraAndroid
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RotateRight
 import androidx.compose.material.icons.filled.TagFaces
@@ -97,9 +85,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.core.content.FileProvider
 import com.example.data.DocumentCategoryGroup
 import com.example.data.DocumentEntity
 import com.example.data.DocumentFieldEntity
@@ -110,14 +97,14 @@ import com.example.ui.components.SafeAreaBackButton
 import com.example.ui.components.SafeAreaOutlinedPillButton
 import com.example.ui.components.SafeAreaPrimaryButton
 import com.example.ui.theme.LocalSafeAreaPalette
-import java.io.ByteArrayOutputStream
+import java.io.File
 
 /**
  * Add Document Screen supporting:
- * 1. Native Android CameraX Document Scanner
+ * 1. Native Android Camera App (`ActivityResultContracts.TakePicture`) for smooth, full-resolution photo capture
  * 2. Zero-permission Android Photo Picker (Gallery)
  * 3. Universal File Import (PDF, Word, Excel, PowerPoint, Images, Text, OpenDocument, CSV, JSON, XML)
- * 4. Manual Structured Entry with Category Presets
+ * 4. Manual Structured Entry across all 15 Category Groups & 100+ Document Subtypes
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -135,7 +122,6 @@ fun AddDocumentScreen(
         if (uri != null) onImportUri(uri)
     }
 
-    // Universal Storage Access Framework picker supporting all requested document & office formats
     val universalFilePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
@@ -154,7 +140,7 @@ fun AddDocumentScreen(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .widthIn(max = 520.dp)
+                .widthIn(max = 540.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -174,7 +160,7 @@ fun AddDocumentScreen(
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "Scan with your device camera, import any document format, or enter structured fields.",
+                text = "Click photos with your phone's native Android camera app, import any file format, or enter structured fields.",
                 style = MaterialTheme.typography.bodySmall,
                 color = palette.inkMuted,
                 textAlign = TextAlign.Center,
@@ -183,10 +169,10 @@ fun AddDocumentScreen(
 
             Spacer(modifier = Modifier.height(18.dp))
 
-            // 1. Scan Document with CameraX
+            // 1. Native Android Camera App
             AddOptionCard(
-                title = "Scan Document with Camera",
-                subtitle = "Native camera capture with edge detection, crop & image enhancement",
+                title = "Click Photo with Native Camera",
+                subtitle = "Launches your phone's native Android camera app with post-capture crop, rotate & enhance",
                 customIcon = { ScanFrameCardIcon(color = palette.ink) },
                 onClick = onOpenCameraScanner,
                 testTag = "add_scan_document_button"
@@ -225,7 +211,7 @@ fun AddDocumentScreen(
             // 4. Enter Manually
             AddOptionCard(
                 title = "Create Structured Record Manually",
-                subtitle = "Choose from 9 categories & 60+ document types",
+                subtitle = "Choose from 15 categories & 100+ document types",
                 icon = Icons.Default.Edit,
                 onClick = {
                     onEnterManually(
@@ -238,9 +224,9 @@ fun AddDocumentScreen(
 
             Spacer(modifier = Modifier.height(18.dp))
 
-            // Quick Category Templates
+            // Quick Category Templates (All 15 Category Groups)
             Text(
-                text = "Quick Start by Category",
+                text = "Quick Start by Category (15 Categories)",
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                 color = palette.ink
             )
@@ -255,13 +241,13 @@ fun AddDocumentScreen(
                     Surface(
                         modifier = Modifier
                             .weight(1f)
-                            .clip(RoundedCornerShape(14.dp))
+                            .clip(RoundedCornerShape(palette.cardCornerRadius))
                             .clickable {
                                 onEnterManually(group.title, group.subtypes.firstOrNull().orEmpty())
                             },
-                        shape = RoundedCornerShape(14.dp),
+                        shape = RoundedCornerShape(palette.cardCornerRadius),
                         color = palette.surface,
-                        border = BorderStroke(1.dp, palette.border.copy(alpha = 0.28f))
+                        border = BorderStroke(palette.borderWidth, palette.border.copy(alpha = palette.borderAlpha))
                     ) {
                         Column(
                             modifier = Modifier.padding(10.dp),
@@ -285,7 +271,7 @@ fun AddDocumentScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier
                 .fillMaxWidth()
-                .widthIn(max = 520.dp)
+                .widthIn(max = 540.dp)
                 .padding(top = 18.dp, bottom = 12.dp)
         ) {
             FolderWithLockIllustration()
@@ -310,15 +296,16 @@ private fun AddOptionCard(
     customIcon: (@Composable () -> Unit)? = null
 ) {
     val palette = LocalSafeAreaPalette.current
+    val shape = RoundedCornerShape(palette.cardCornerRadius)
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
+            .clip(shape)
             .clickable(onClick = onClick)
             .testTag(testTag),
-        shape = RoundedCornerShape(20.dp),
+        shape = shape,
         color = palette.surface,
-        border = BorderStroke(1.2.dp, palette.border.copy(alpha = 0.6f))
+        border = BorderStroke(palette.borderWidth, palette.border.copy(alpha = 0.6f))
     ) {
         Row(
             modifier = Modifier
@@ -388,13 +375,18 @@ private fun ScanFrameCardIcon(color: Color) {
 }
 
 /**
- * Native Android CameraX Document Scanner:
- * - Zero fake or synthetic bitmaps
- * - Captures real camera frames via ImageCapture (JPEG & YUV_420_888) or live PreviewView bitmap
- * - Edge detection guide frame (ID Card, Passport, A4 Document aspect presets)
- * - Post-capture perspective/edge crop, 90° rotation, and high-contrast document enhancement filter
- * - Two-sided front/back document capture
+ * Native Android System Camera App Document Capture & Studio:
+ * - Launches the phone's genuine Native Android Camera App (`ActivityResultContracts.TakePicture` with `FileProvider` URI)
+ *   so clicking images is smooth, fast, and uses the device's full camera hardware ISP, autofocus, HDR & flash.
+ * - Includes a 1-tap Quick Camera Snapshot fallback (`ActivityResultContracts.TakePicturePreview`) and Gallery Import.
+ * - Post-capture Document Studio supports:
+ *   - 90° Rotation
+ *   - Aspect-Ratio Edge Cropping (ID Card, Passport, A4 Page)
+ *   - High-Contrast Document Enhancement
+ *   - Two-sided (Front & Back) native camera capture
+ *   - 15 Categories & 100+ Subtypes selection
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun CameraScannerScreen(
     onBack: () -> Unit,
@@ -411,7 +403,6 @@ fun CameraScannerScreen(
 ) {
     val palette = LocalSafeAreaPalette.current
     val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
 
     var hasCameraPermission by remember {
         mutableStateOf(
@@ -419,101 +410,99 @@ fun CameraScannerScreen(
                 PackageManager.PERMISSION_GRANTED
         )
     }
-    var permissionDeniedOnce by remember { mutableStateOf(false) }
-
-    val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        hasCameraPermission = granted
-        if (!granted) permissionDeniedOnce = true
-    }
-
-    LaunchedEffect(Unit) {
-        if (!hasCameraPermission) {
-            permissionLauncher.launch(Manifest.permission.CAMERA)
-        }
-    }
 
     var capturedFront by remember { mutableStateOf<Bitmap?>(null) }
     var capturedBack by remember { mutableStateOf<Bitmap?>(null) }
     var isCapturingBackSide by remember { mutableStateOf(false) }
-    var flashEnabled by remember { mutableStateOf(false) }
-    var useFrontCamera by remember { mutableStateOf(false) }
     var selectedFrameAspect by remember { mutableStateOf("ID Card") } // "ID Card", "Passport", "A4 Page"
     var selectedCategoryGroup by remember { mutableStateOf(DocumentCategoryGroup.PERSONAL) }
     var selectedSubtype by remember { mutableStateOf(DocumentCategoryGroup.PERSONAL.subtypes.first()) }
     var customTitleHint by remember { mutableStateOf("") }
     var customOcrNotes by remember { mutableStateOf("") }
-    var cameraErrorText by remember { mutableStateOf<String?>(null) }
-    var previewViewRef by remember { mutableStateOf<PreviewView?>(null) }
+    var statusMessage by remember { mutableStateOf<String?>(null) }
+    var pendingCaptureFile by remember { mutableStateOf<File?>(null) }
+    var hasAutoLaunchedOnce by remember { mutableStateOf(false) }
 
-    val imageCapture = remember {
-        ImageCapture.Builder()
-            .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-            .build()
-    }
-
-    if (!hasCameraPermission) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(palette.canvas)
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            SafeAreaBackButton(
-                onClick = onBack,
-                modifier = Modifier.align(Alignment.Start)
-            )
-            Spacer(modifier = Modifier.height(24.dp))
-            Icon(
-                imageVector = Icons.Default.CameraAlt,
-                contentDescription = null,
-                tint = palette.primary,
-                modifier = Modifier.size(56.dp)
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-            Text(
-                text = "Camera Access Needed to Scan",
-                style = MaterialTheme.typography.headlineMedium,
-                color = palette.ink,
-                textAlign = TextAlign.Center
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = if (permissionDeniedOnce) {
-                    "Camera permission was denied. Grant Camera permission to scan documents directly, or import an existing image below."
+    // 1. Full-resolution Native Android Camera App launcher via FileProvider
+    val nativeCameraTakePictureLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        val file = pendingCaptureFile
+        if (success && file != null && file.exists() && file.length() > 0L) {
+            val decoded = decodeSampledBitmapFromFile(file, maxDimension = 2200)
+            if (decoded != null) {
+                if (isCapturingBackSide) {
+                    capturedBack = decoded
                 } else {
-                    "SAFEAREA uses your device's camera locally to capture documents, crop edges, and enhance readability."
-                },
-                style = MaterialTheme.typography.bodyMedium,
-                color = palette.inkMuted,
-                textAlign = TextAlign.Center
-            )
-            Spacer(modifier = Modifier.height(24.dp))
-            SafeAreaPrimaryButton(
-                text = "Grant Camera Permission",
-                onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) }
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            SafeAreaOutlinedPillButton(
-                text = "Import from Gallery Instead",
-                leadingIcon = Icons.Default.Image,
-                onClick = onFallbackImportPhoto
-            )
-            Spacer(modifier = Modifier.height(10.dp))
-            SafeAreaOutlinedPillButton(
-                text = "Enter Details Manually",
-                leadingIcon = Icons.Default.Edit,
-                onClick = onFallbackManualEntry
-            )
+                    capturedFront = decoded
+                }
+                statusMessage = null
+            } else {
+                statusMessage = "Could not decode captured photo. Please try again or pick from Gallery."
+            }
+        } else {
+            if (capturedFront == null) {
+                statusMessage = "Tap 'Open Native Camera App' below to click a photo."
+            }
         }
-        return
     }
 
-    // Post-Capture Crop / Enhance / Rotate / Category Selection Screen
-    val activeCaptured = if (isCapturingBackSide) capturedBack else capturedFront
+    // 2. Quick Native Camera Bitmap Preview launcher (fallback for devices/ROMs without FileProvider output)
+    val quickCameraPreviewLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicturePreview()
+    ) { bitmap ->
+        if (bitmap != null) {
+            if (isCapturingBackSide) {
+                capturedBack = bitmap
+            } else {
+                capturedFront = bitmap
+            }
+            statusMessage = null
+        }
+    }
+
+    fun launchNativeCameraApp(forBackSide: Boolean) {
+        isCapturingBackSide = forBackSide
+        statusMessage = null
+        runCatching {
+            val outFile = createCameraOutputFile(context)
+            pendingCaptureFile = outFile
+            val uri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                outFile
+            )
+            nativeCameraTakePictureLauncher.launch(uri)
+        }.onFailure {
+            runCatching {
+                quickCameraPreviewLauncher.launch(null)
+            }.onFailure { err ->
+                statusMessage = "No camera app available (${err.localizedMessage ?: "use Gallery import"})."
+            }
+        }
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasCameraPermission = granted
+        if (granted && !hasAutoLaunchedOnce && capturedFront == null) {
+            hasAutoLaunchedOnce = true
+            launchNativeCameraApp(forBackSide = false)
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        if (!hasCameraPermission) {
+            permissionLauncher.launch(Manifest.permission.CAMERA)
+        } else if (!hasAutoLaunchedOnce && capturedFront == null) {
+            hasAutoLaunchedOnce = true
+            launchNativeCameraApp(forBackSide = false)
+        }
+    }
+
+    // Post-Capture Document Studio (Rotate, Crop, Enhance, Back Side & Category Selection)
+    val activeCaptured = if (isCapturingBackSide && capturedBack != null) capturedBack else capturedFront
     if (activeCaptured != null) {
         Column(
             modifier = Modifier
@@ -523,428 +512,467 @@ fun CameraScannerScreen(
                 .padding(18.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = 560.dp)
             ) {
-                SafeAreaBackButton(onClick = {
-                    if (isCapturingBackSide) {
-                        capturedBack = null
-                        isCapturingBackSide = false
-                    } else {
-                        capturedFront = null
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    SafeAreaBackButton(onClick = {
+                        if (isCapturingBackSide && capturedBack != null) {
+                            capturedBack = null
+                            isCapturingBackSide = false
+                        } else {
+                            capturedFront = null
+                        }
+                    })
+                    Text(
+                        text = if (isCapturingBackSide && capturedBack != null) {
+                            "Review Back Side Photo"
+                        } else {
+                            "Review & Enhance Camera Photo"
+                        },
+                        style = MaterialTheme.typography.titleLarge,
+                        color = palette.ink
+                    )
+                    Spacer(modifier = Modifier.width(48.dp))
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(250.dp),
+                    shape = RoundedCornerShape(palette.cardCornerRadius),
+                    color = palette.surface,
+                    border = BorderStroke(palette.borderWidth, palette.border.copy(alpha = 0.5f))
+                ) {
+                    Image(
+                        bitmap = activeCaptured.asImageBitmap(),
+                        contentDescription = "Captured camera photo",
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(8.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Aspect Preset Selector for Auto-Edge Crop
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Crop Preset:",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                        color = palette.inkMuted
+                    )
+                    listOf("ID Card", "Passport", "A4 Page").forEach { aspect ->
+                        FilterChip(
+                            selected = selectedFrameAspect == aspect,
+                            onClick = { selectedFrameAspect = aspect },
+                            label = { Text(aspect) }
+                        )
                     }
-                })
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // Real Image Processing Controls: Rotate 90°, Auto-Edge Crop, Contrast Enhance, Retake in Native Camera
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    ScannerEditChip(
+                        label = "Rotate 90°",
+                        icon = Icons.Default.RotateRight,
+                        onClick = {
+                            val rotated = rotateBitmap(activeCaptured, 90f)
+                            if (isCapturingBackSide && capturedBack != null) capturedBack = rotated else capturedFront = rotated
+                        }
+                    )
+                    ScannerEditChip(
+                        label = "Crop ($selectedFrameAspect)",
+                        icon = Icons.Default.Crop,
+                        onClick = {
+                            val cropped = cropBitmapToFrameAspect(activeCaptured, selectedFrameAspect)
+                            if (isCapturingBackSide && capturedBack != null) capturedBack = cropped else capturedFront = cropped
+                        }
+                    )
+                    ScannerEditChip(
+                        label = "Enhance Contrast",
+                        icon = Icons.Default.AutoFixHigh,
+                        onClick = {
+                            val enhanced = enhanceDocumentScanBitmap(activeCaptured)
+                            if (isCapturingBackSide && capturedBack != null) capturedBack = enhanced else capturedFront = enhanced
+                        }
+                    )
+                    ScannerEditChip(
+                        label = "Retake Photo",
+                        icon = Icons.Default.Refresh,
+                        onClick = {
+                            launchNativeCameraApp(forBackSide = isCapturingBackSide && capturedBack != null)
+                        }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Category Group Selector (All 15 Categories)
                 Text(
-                    text = if (isCapturingBackSide) "Review Back Scan" else "Crop, Enhance & Save Scan",
-                    style = MaterialTheme.typography.titleLarge,
+                    text = "Document Category (15 Categories)",
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
                     color = palette.ink
                 )
-                Spacer(modifier = Modifier.width(48.dp))
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(230.dp),
-                shape = RoundedCornerShape(18.dp),
-                color = palette.surface,
-                border = BorderStroke(1.2.dp, palette.border.copy(alpha = 0.5f))
-            ) {
-                Image(
-                    bitmap = activeCaptured.asImageBitmap(),
-                    contentDescription = "Captured document scan",
-                    contentScale = ContentScale.Fit,
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .padding(8.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Real Image Processing Controls: Rotate 90°, Edge Crop, Contrast Enhance, Retake
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                ScannerEditChip(
-                    label = "Rotate 90°",
-                    icon = Icons.Default.RotateRight,
-                    onClick = {
-                        val rotated = rotateBitmap(activeCaptured, 90f)
-                        if (isCapturingBackSide) capturedBack = rotated else capturedFront = rotated
-                    }
-                )
-                ScannerEditChip(
-                    label = "Auto-Edge Crop",
-                    icon = Icons.Default.Crop,
-                    onClick = {
-                        val cropped = cropBitmapToFrameAspect(activeCaptured, selectedFrameAspect)
-                        if (isCapturingBackSide) capturedBack = cropped else capturedFront = cropped
-                    }
-                )
-                ScannerEditChip(
-                    label = "Enhance Contrast",
-                    icon = Icons.Default.AutoFixHigh,
-                    onClick = {
-                        val enhanced = enhanceDocumentScanBitmap(activeCaptured)
-                        if (isCapturingBackSide) capturedBack = enhanced else capturedFront = enhanced
-                    }
-                )
-                ScannerEditChip(
-                    label = "Retake",
-                    icon = Icons.Default.Refresh,
-                    onClick = {
-                        if (isCapturingBackSide) capturedBack = null else capturedFront = null
-                    }
-                )
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // Category Group Selector
-            Text(
-                text = "Document Category",
-                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                color = palette.ink,
-                modifier = Modifier.align(Alignment.Start)
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                DocumentCategoryGroup.entries.forEach { group ->
-                    FilterChip(
-                        selected = selectedCategoryGroup == group,
-                        onClick = {
-                            selectedCategoryGroup = group
-                            selectedSubtype = group.subtypes.firstOrNull().orEmpty()
-                        },
-                        label = { Text(group.shortTitle) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = palette.primary,
-                            selectedLabelColor = Color.White
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    DocumentCategoryGroup.entries.forEach { group ->
+                        FilterChip(
+                            selected = selectedCategoryGroup == group,
+                            onClick = {
+                                selectedCategoryGroup = group
+                                selectedSubtype = group.subtypes.firstOrNull().orEmpty()
+                            },
+                            label = { Text(group.shortTitle) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = palette.primary,
+                                selectedLabelColor = Color.White
+                            )
                         )
-                    )
+                    }
                 }
-            }
 
-            Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(6.dp))
 
-            // Subtype Selector
-            Text(
-                text = "Document Type",
-                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                color = palette.ink,
-                modifier = Modifier.align(Alignment.Start)
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                selectedCategoryGroup.subtypes.forEach { sub ->
-                    FilterChip(
-                        selected = selectedSubtype == sub,
-                        onClick = { selectedSubtype = sub },
-                        label = { Text(sub) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = palette.ink,
-                            selectedLabelColor = palette.surface
-                        )
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            OutlinedTextField(
-                value = customTitleHint,
-                onValueChange = { customTitleHint = it },
-                label = { Text("Document Title (defaults to $selectedSubtype)") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            OutlinedTextField(
-                value = customOcrNotes,
-                onValueChange = { customOcrNotes = it },
-                label = { Text("Optional Key:Value Fields (e.g. ID No: 12345)") },
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            if (capturedBack == null && !isCapturingBackSide) {
-                SafeAreaOutlinedPillButton(
-                    text = "Scan Back Side (Two-Sided Document)",
-                    leadingIcon = Icons.Default.CameraAlt,
-                    onClick = { isCapturingBackSide = true }
+                // Subtype Selector
+                Text(
+                    text = "Document Type (${selectedCategoryGroup.shortTitle})",
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                    color = palette.ink
                 )
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    selectedCategoryGroup.subtypes.forEach { sub ->
+                        FilterChip(
+                            selected = selectedSubtype == sub,
+                            onClick = { selectedSubtype = sub },
+                            label = { Text(sub) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = palette.ink,
+                                selectedLabelColor = palette.surface
+                            )
+                        )
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(10.dp))
-            }
 
-            SafeAreaPrimaryButton(
-                text = "Save Scan & Review Details",
-                leadingIcon = Icons.Default.AutoAwesome,
-                onClick = {
-                    val front = capturedFront ?: return@SafeAreaPrimaryButton
-                    onScanCompleted(
-                        front,
-                        capturedBack,
-                        customTitleHint.ifBlank { selectedSubtype },
-                        selectedCategoryGroup.title,
-                        selectedSubtype,
-                        customOcrNotes
+                OutlinedTextField(
+                    value = customTitleHint,
+                    onValueChange = { customTitleHint = it },
+                    label = { Text("Document Title (defaults to $selectedSubtype)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = customOcrNotes,
+                    onValueChange = { customOcrNotes = it },
+                    label = { Text("Optional Key:Value Fields (e.g. ID No: 12345)") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                if (capturedBack == null) {
+                    SafeAreaOutlinedPillButton(
+                        text = "Click Back Side with Native Camera",
+                        leadingIcon = Icons.Default.CameraAlt,
+                        onClick = { launchNativeCameraApp(forBackSide = true) }
                     )
-                },
-                modifier = Modifier.testTag("confirm_scan_ocr_button")
-            )
+                    Spacer(modifier = Modifier.height(10.dp))
+                } else {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = palette.successContainer,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Front & Back photos attached (2 pages)",
+                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                                color = palette.onSuccessContainer
+                            )
+                            TextButton(onClick = { isCapturingBackSide = !isCapturingBackSide }) {
+                                Text(if (isCapturingBackSide) "View Front" else "View Back")
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
+
+                SafeAreaPrimaryButton(
+                    text = "Save Photo & Continue to Details",
+                    leadingIcon = Icons.Default.AutoAwesome,
+                    onClick = {
+                        val front = capturedFront ?: return@SafeAreaPrimaryButton
+                        onScanCompleted(
+                            front,
+                            capturedBack,
+                            customTitleHint.ifBlank { selectedSubtype },
+                            selectedCategoryGroup.title,
+                            selectedSubtype,
+                            customOcrNotes
+                        )
+                    },
+                    modifier = Modifier.testTag("confirm_scan_ocr_button")
+                )
+            }
         }
         return
     }
 
-    // Live CameraX Preview with Aspect Ratio Edge Guide
+    // Native Android System Camera Launcher Hub
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF12131C))
+            .background(palette.canvas)
+            .verticalScroll(rememberScrollState())
+            .padding(22.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.SpaceBetween
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            SafeAreaBackButton(onClick = onBack)
-            Text(
-                text = if (isCapturingBackSide) "Scan Back Side" else "Align Document in Frame",
-                style = MaterialTheme.typography.titleMedium,
-                color = Color.White
-            )
-            Row {
-                IconButton(onClick = { flashEnabled = !flashEnabled }) {
-                    Icon(
-                        imageVector = if (flashEnabled) Icons.Default.FlashOn else Icons.Default.FlashOff,
-                        contentDescription = "Toggle flash",
-                        tint = Color.White
-                    )
-                }
-                IconButton(onClick = { useFrontCamera = !useFrontCamera }) {
-                    Icon(
-                        imageVector = Icons.Default.FlipCameraAndroid,
-                        contentDescription = "Switch camera",
-                        tint = Color.White
-                    )
-                }
-            }
-        }
-
-        // Aspect Ratio Frame Selector Bar
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.Center
-        ) {
-            listOf("ID Card", "Passport", "A4 Page").forEach { aspect ->
-                val selected = selectedFrameAspect == aspect
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = if (selected) Color(0xFF438B68) else Color(0xFF252736),
-                    modifier = Modifier
-                        .padding(horizontal = 4.dp)
-                        .clickable { selectedFrameAspect = aspect }
-                ) {
-                    Text(
-                        text = aspect,
-                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                        color = Color.White,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                    )
-                }
-            }
-        }
-
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-        ) {
-            AndroidView(
-                factory = { ctx ->
-                    PreviewView(ctx).apply {
-                        implementationMode = PreviewView.ImplementationMode.COMPATIBLE
-                        previewViewRef = this
-                    }
-                },
-                update = { previewView ->
-                    previewViewRef = previewView
-                    val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
-                    cameraProviderFuture.addListener({
-                        runCatching {
-                            val cameraProvider = cameraProviderFuture.get()
-                            val preview = Preview.Builder().build().also {
-                                it.setSurfaceProvider(previewView.surfaceProvider)
-                            }
-                            imageCapture.flashMode = if (flashEnabled) {
-                                ImageCapture.FLASH_MODE_ON
-                            } else {
-                                ImageCapture.FLASH_MODE_OFF
-                            }
-                            val selector = if (useFrontCamera) {
-                                CameraSelector.DEFAULT_FRONT_CAMERA
-                            } else {
-                                CameraSelector.DEFAULT_BACK_CAMERA
-                            }
-                            cameraProvider.unbindAll()
-                            cameraProvider.bindToLifecycle(
-                                lifecycleOwner,
-                                selector,
-                                preview,
-                                imageCapture
-                            )
-                        }.onFailure { err ->
-                            cameraErrorText = err.localizedMessage
-                        }
-                    }, ContextCompat.getMainExecutor(context))
-                },
-                modifier = Modifier.fillMaxSize()
-            )
-
-            // Dynamic Document Edge Detection Guide Overlay
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val frameW = size.width * 0.86f
-                val ratio = when (selectedFrameAspect) {
-                    "ID Card" -> 0.63f
-                    "Passport" -> 0.72f
-                    else -> 1.25f
-                }
-                val frameH = (frameW * ratio).coerceAtMost(size.height * 0.82f)
-                val left = (size.width - frameW) / 2f
-                val top = (size.height - frameH) / 2f
-                val corner = 44f
-                val c = Color(0xFF78A88F)
-
-                drawLine(c, Offset(left, top + corner), Offset(left, top), 8f, StrokeCap.Round)
-                drawLine(c, Offset(left, top), Offset(left + corner, top), 8f, StrokeCap.Round)
-                drawLine(c, Offset(left + frameW - corner, top), Offset(left + frameW, top), 8f, StrokeCap.Round)
-                drawLine(c, Offset(left + frameW, top), Offset(left + frameW, top + corner), 8f, StrokeCap.Round)
-                drawLine(c, Offset(left, top + frameH - corner), Offset(left, top + frameH), 8f, StrokeCap.Round)
-                drawLine(c, Offset(left, top + frameH), Offset(left + corner, top + frameH), 8f, StrokeCap.Round)
-                drawLine(c, Offset(left + frameW - corner, top + frameH), Offset(left + frameW, top + frameH), 8f, StrokeCap.Round)
-                drawLine(c, Offset(left + frameW, top + frameH), Offset(left + frameW, top + frameH - corner), 8f, StrokeCap.Round)
-            }
-        }
-
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color(0xFF171431))
-                .padding(horizontal = 20.dp, vertical = 16.dp),
+                .widthIn(max = 520.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            if (cameraErrorText != null) {
-                Text(
-                    text = cameraErrorText!!,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFFFFB4AB),
-                    textAlign = TextAlign.Center
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-            } else {
-                Text(
-                    text = "$selectedFrameAspect edge guide active · Tap shutter to capture",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFFDCECE2)
-                )
-                Spacer(modifier = Modifier.height(10.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                SafeAreaBackButton(onClick = onBack)
             }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Surface(
+                modifier = Modifier.size(92.dp),
+                shape = CircleShape,
+                color = palette.primary.copy(alpha = 0.12f),
+                border = BorderStroke(1.5.dp, palette.primary.copy(alpha = 0.4f))
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Default.PhotoCamera,
+                        contentDescription = null,
+                        tint = palette.primary,
+                        modifier = Modifier.size(44.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text(
+                text = "Native Android Camera",
+                style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.ExtraBold),
+                color = palette.ink,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "Uses your phone's built-in Android camera app for smooth autofocus, HDR, flash, and crisp document photos. After clicking a photo, you can crop, rotate, and enhance it before encrypted storage.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = palette.inkMuted,
+                textAlign = TextAlign.Center
+            )
+
+            if (!statusMessage.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = palette.surface,
+                    border = BorderStroke(1.dp, palette.border.copy(alpha = 0.3f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = statusMessage!!,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = palette.ink,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(12.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(22.dp))
+
+            // Pre-select category before or after clicking image
+            Surface(
+                shape = RoundedCornerShape(palette.cardCornerRadius),
+                color = palette.surface,
+                border = BorderStroke(palette.borderWidth, palette.border.copy(alpha = palette.borderAlpha)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "Document Category Preset",
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                        color = palette.ink
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        DocumentCategoryGroup.entries.forEach { group ->
+                            FilterChip(
+                                selected = selectedCategoryGroup == group,
+                                onClick = {
+                                    selectedCategoryGroup = group
+                                    selectedSubtype = group.subtypes.firstOrNull().orEmpty()
+                                },
+                                label = { Text(group.shortTitle) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = palette.primary,
+                                    selectedLabelColor = Color.White
+                                )
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = "Document Subtype",
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                        color = palette.ink
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        selectedCategoryGroup.subtypes.forEach { sub ->
+                            FilterChip(
+                                selected = selectedSubtype == sub,
+                                onClick = { selectedSubtype = sub },
+                                label = { Text(sub) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = palette.ink,
+                                    selectedLabelColor = palette.surface
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            SafeAreaPrimaryButton(
+                text = "Open Native Android Camera",
+                leadingIcon = Icons.Default.CameraAlt,
+                onClick = {
+                    if (!hasCameraPermission) {
+                        permissionLauncher.launch(Manifest.permission.CAMERA)
+                    } else {
+                        launchNativeCameraApp(forBackSide = false)
+                    }
+                },
+                modifier = Modifier.testTag("camera_shutter_button")
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                TextButton(onClick = onFallbackImportPhoto) {
-                    Icon(Icons.Default.Image, contentDescription = null, tint = Color.White)
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Gallery", color = Color.White)
-                }
-
-                ButtonCaptureShutter(
+                SafeAreaOutlinedPillButton(
+                    text = "Quick Snapshot",
+                    leadingIcon = Icons.Default.PhotoCamera,
                     onClick = {
-                        cameraErrorText = null
-                        val executor = ContextCompat.getMainExecutor(context)
-                        try {
-                            imageCapture.takePicture(
-                                executor,
-                                object : ImageCapture.OnImageCapturedCallback() {
-                                    override fun onCaptureSuccess(image: ImageProxy) {
-                                        val bmp = imageProxyToBitmap(image) ?: previewViewRef?.bitmap
-                                        image.close()
-                                        if (bmp != null) {
-                                            if (isCapturingBackSide) {
-                                                capturedBack = bmp
-                                            } else {
-                                                capturedFront = bmp
-                                            }
-                                        } else {
-                                            cameraErrorText = "Could not decode camera frame. Try again or import from Gallery."
-                                        }
-                                    }
-
-                                    override fun onError(exception: ImageCaptureException) {
-                                        val liveBmp = previewViewRef?.bitmap
-                                        if (liveBmp != null) {
-                                            if (isCapturingBackSide) {
-                                                capturedBack = liveBmp
-                                            } else {
-                                                capturedFront = liveBmp
-                                            }
-                                        } else {
-                                            cameraErrorText = "Camera capture error: ${exception.localizedMessage ?: "Check camera sensor or import from Gallery."}"
-                                        }
-                                    }
-                                }
-                            )
-                        } catch (e: Exception) {
-                            val liveBmp = previewViewRef?.bitmap
-                            if (liveBmp != null) {
-                                if (isCapturingBackSide) {
-                                    capturedBack = liveBmp
-                                } else {
-                                    capturedFront = liveBmp
-                                }
-                            } else {
-                                cameraErrorText = "Camera not ready (${e.localizedMessage ?: "try Gallery import"})."
-                            }
+                        if (!hasCameraPermission) {
+                            permissionLauncher.launch(Manifest.permission.CAMERA)
+                        } else {
+                            runCatching { quickCameraPreviewLauncher.launch(null) }
                         }
-                    }
+                    },
+                    modifier = Modifier.weight(1f)
                 )
-
-                TextButton(onClick = onFallbackManualEntry) {
-                    Icon(Icons.Default.Edit, contentDescription = null, tint = Color.White)
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Manual", color = Color.White)
-                }
+                SafeAreaOutlinedPillButton(
+                    text = "Pick Gallery",
+                    leadingIcon = Icons.Default.Image,
+                    onClick = onFallbackImportPhoto,
+                    modifier = Modifier.weight(1f)
+                )
             }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            SafeAreaOutlinedPillButton(
+                text = "Enter Details Manually",
+                leadingIcon = Icons.Default.Edit,
+                onClick = onFallbackManualEntry
+            )
         }
+
+        Spacer(modifier = Modifier.height(12.dp))
     }
+}
+
+private fun createCameraOutputFile(context: Context): File {
+    val dir = File(context.cacheDir, "exports").apply { if (!exists()) mkdirs() }
+    return File(dir, "native_camera_${System.currentTimeMillis()}.jpg")
+}
+
+private fun decodeSampledBitmapFromFile(file: File, maxDimension: Int): Bitmap? {
+    return runCatching {
+        val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.absolutePath, boundsOpts)
+        var sampleSize = 1
+        while (boundsOpts.outWidth / sampleSize > maxDimension || boundsOpts.outHeight / sampleSize > maxDimension) {
+            sampleSize *= 2
+        }
+        val decodeOpts = BitmapFactory.Options().apply {
+            inSampleSize = sampleSize
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
+        BitmapFactory.decodeFile(file.absolutePath, decodeOpts)
+    }.getOrNull()
 }
 
 @Composable
@@ -973,69 +1001,13 @@ private fun ScannerEditChip(
     }
 }
 
-@Composable
-private fun ButtonCaptureShutter(onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .size(72.dp)
-            .clip(CircleShape)
-            .border(4.dp, Color.White, CircleShape)
-            .clickable(onClick = onClick)
-            .padding(6.dp)
-            .testTag("camera_shutter_button"),
-        contentAlignment = Alignment.Center
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .clip(CircleShape)
-                .background(Color(0xFFD5104B))
-        )
-    }
-}
-
-private fun imageProxyToBitmap(image: ImageProxy): Bitmap? {
-    return runCatching {
-        val rotationDegrees = image.imageInfo.rotationDegrees.toFloat()
-        val rawBitmap = if (image.format == ImageFormat.JPEG || image.planes.size == 1) {
-            val buffer = image.planes[0].buffer
-            val bytes = ByteArray(buffer.remaining())
-            buffer.get(bytes)
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-        } else if (image.format == ImageFormat.YUV_420_888 && image.planes.size >= 3) {
-            val yBuffer = image.planes[0].buffer
-            val uBuffer = image.planes[1].buffer
-            val vBuffer = image.planes[2].buffer
-            val ySize = yBuffer.remaining()
-            val uSize = uBuffer.remaining()
-            val vSize = vBuffer.remaining()
-            val nv21 = ByteArray(ySize + uSize + vSize)
-            yBuffer.get(nv21, 0, ySize)
-            vBuffer.get(nv21, ySize, vSize)
-            uBuffer.get(nv21, ySize + vSize, uSize)
-            val yuvImage = YuvImage(nv21, ImageFormat.NV21, image.width, image.height, null)
-            val out = ByteArrayOutputStream()
-            yuvImage.compressToJpeg(Rect(0, 0, image.width, image.height), 92, out)
-            val imageBytes = out.toByteArray()
-            BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
-        } else {
-            null
-        }
-        if (rawBitmap != null && rotationDegrees != 0f) {
-            rotateBitmap(rawBitmap, rotationDegrees)
-        } else {
-            rawBitmap
-        }
-    }.getOrNull()
-}
-
 private fun rotateBitmap(src: Bitmap, degrees: Float): Bitmap {
     val matrix = Matrix().apply { postRotate(degrees) }
     return Bitmap.createBitmap(src, 0, 0, src.width, src.height, matrix, true)
 }
 
 private fun cropBitmapToFrameAspect(src: Bitmap, aspectMode: String): Bitmap {
-    val targetW = (src.width * 0.86f).toInt().coerceAtLeast(120)
+    val targetW = (src.width * 0.88f).toInt().coerceAtLeast(120)
     val aspect = when (aspectMode) {
         "ID Card" -> 0.63f
         "Passport" -> 0.72f
@@ -1075,9 +1047,9 @@ private fun enhanceDocumentScanBitmap(src: Bitmap): Bitmap {
 
 /**
  * Document Editor & Metadata Configuration Screen:
- * - Supports all 9 DocumentCategoryGroup categories + custom categories
- * - Supports all 60+ Document Subtypes with 1-tap selection
- * - Supports attaching any file format (PDF, Word, Excel, PowerPoint, Images, Text, OpenDocument, CSV, JSON, XML)
+ * - Supports all 15 DocumentCategoryGroup categories + custom categories
+ * - Supports all 100+ Document Subtypes with 1-tap selection
+ * - Supports attaching any file format or clicking a photo with the Native Android Camera App
  * - Supports Issue Date, Expiry Date, Custom Reminder Lead Days, Description, Tags, Notes, and Structured Fields
  */
 @Composable
@@ -1091,6 +1063,7 @@ fun DocumentEditorScreen(
     onCancel: () -> Unit
 ) {
     val palette = LocalSafeAreaPalette.current
+    val context = LocalContext.current
 
     var title by remember(initialDocument) { mutableStateOf(initialDocument.title) }
     var category by remember(initialDocument) { mutableStateOf(initialDocument.category) }
@@ -1114,10 +1087,23 @@ fun DocumentEditorScreen(
     }
 
     var pickingBackSide by remember { mutableStateOf(false) }
+    var editorCameraFile by remember { mutableStateOf<File?>(null) }
+    var editorCameraUri by remember { mutableStateOf<Uri?>(null) }
+
     val attachmentPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) onAttachFrontOrBackUri(uri, pickingBackSide)
+    }
+
+    val editorCameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        val uri = editorCameraUri
+        val file = editorCameraFile
+        if (success && uri != null && file != null && file.exists() && file.length() > 0L) {
+            onAttachFrontOrBackUri(uri, pickingBackSide)
+        }
     }
 
     Column(
@@ -1151,7 +1137,7 @@ fun DocumentEditorScreen(
 
             if (isOcrReviewMode) {
                 Surface(
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(palette.cardCornerRadius),
                     color = palette.warningContainer,
                     border = BorderStroke(1.dp, palette.warning),
                     modifier = Modifier.fillMaxWidth()
@@ -1173,7 +1159,7 @@ fun DocumentEditorScreen(
                 Spacer(modifier = Modifier.height(12.dp))
             }
 
-            // Category Selection
+            // Category Selection (15 Categories + Custom)
             Text(
                 text = "1. Document Category",
                 style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
@@ -1207,7 +1193,7 @@ fun DocumentEditorScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Subtype Selection (60+ Supported Document Subtypes)
+            // Subtype Selection (100+ Supported Document Subtypes)
             Text(
                 text = "2. Document Type (${activeCategoryGroup.shortTitle})",
                 style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
@@ -1334,7 +1320,7 @@ fun DocumentEditorScreen(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // File Attachment Controls (All supported formats)
+            // File Attachment & Native Camera Controls
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -1343,7 +1329,7 @@ fun DocumentEditorScreen(
                     text = if (initialDocument.frontFileRef.isNotBlank()) {
                         "Replace File (${initialDocument.displayFormatBadge})"
                     } else {
-                        "Attach File / Scan"
+                        "Attach File"
                     },
                     onClick = {
                         pickingBackSide = false
@@ -1352,10 +1338,48 @@ fun DocumentEditorScreen(
                     modifier = Modifier.weight(1f)
                 )
                 SafeAreaOutlinedPillButton(
-                    text = if (initialDocument.backFileRef.isNotBlank()) "Replace Back Side" else "Attach Back Side",
+                    text = "Click Camera Photo",
+                    leadingIcon = Icons.Default.CameraAlt,
+                    onClick = {
+                        pickingBackSide = false
+                        runCatching {
+                            val f = createCameraOutputFile(context)
+                            val u = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", f)
+                            editorCameraFile = f
+                            editorCameraUri = u
+                            editorCameraLauncher.launch(u)
+                        }
+                    },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                SafeAreaOutlinedPillButton(
+                    text = if (initialDocument.backFileRef.isNotBlank()) "Replace Back File" else "Attach Back File",
                     onClick = {
                         pickingBackSide = true
                         attachmentPicker.launch(arrayOf("image/*"))
+                    },
+                    modifier = Modifier.weight(1f)
+                )
+                SafeAreaOutlinedPillButton(
+                    text = "Camera Back Side",
+                    leadingIcon = Icons.Default.PhotoCamera,
+                    onClick = {
+                        pickingBackSide = true
+                        runCatching {
+                            val f = createCameraOutputFile(context)
+                            val u = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", f)
+                            editorCameraFile = f
+                            editorCameraUri = u
+                            editorCameraLauncher.launch(u)
+                        }
                     },
                     modifier = Modifier.weight(1f)
                 )
@@ -1395,9 +1419,9 @@ fun DocumentEditorScreen(
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 fieldsState.forEachIndexed { idx, field ->
                     Surface(
-                        shape = RoundedCornerShape(14.dp),
+                        shape = RoundedCornerShape(palette.cardCornerRadius),
                         color = palette.surface,
-                        border = BorderStroke(1.dp, palette.border.copy(alpha = 0.3f))
+                        border = BorderStroke(palette.borderWidth, palette.border.copy(alpha = palette.borderAlpha))
                     ) {
                         Column(modifier = Modifier.padding(12.dp)) {
                             Row(

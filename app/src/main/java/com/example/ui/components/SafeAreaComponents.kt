@@ -29,7 +29,9 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Apartment
 import androidx.compose.material.icons.filled.Badge
+import androidx.compose.material.icons.filled.BusinessCenter
 import androidx.compose.material.icons.filled.CheckBox
 import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.Description
@@ -39,10 +41,14 @@ import androidx.compose.material.icons.filled.Gavel
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.HealthAndSafety
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.HomeRepairService
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.PersonOutline
+import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.School
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material.icons.filled.WorkOutline
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.GridView
@@ -504,7 +510,7 @@ fun SafeAreaPrimaryButton(
             .fillMaxWidth()
             .heightIn(min = 50.dp),
         contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp),
-        shape = RoundedCornerShape(26.dp),
+        shape = RoundedCornerShape(palette.buttonCornerRadius),
         colors = ButtonDefaults.buttonColors(
             containerColor = palette.primary,
             contentColor = Color(0xFFFFFDF7),
@@ -564,8 +570,8 @@ fun SafeAreaOutlinedPillButton(
             .fillMaxWidth()
             .heightIn(min = 48.dp),
         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
-        shape = RoundedCornerShape(24.dp),
-        border = BorderStroke(1.2.dp, palette.border.copy(alpha = 0.8f)),
+        shape = RoundedCornerShape(palette.buttonCornerRadius),
+        border = BorderStroke(palette.borderWidth, palette.border.copy(alpha = 0.8f)),
         colors = ButtonDefaults.outlinedButtonColors(
             containerColor = palette.surface.copy(alpha = 0.65f),
             contentColor = palette.ink
@@ -598,24 +604,30 @@ fun SafeAreaOutlinedPillButton(
 }
 
 /**
- * Maps each of the 9 `DocumentCategoryGroup` entries to a distinctive vector icon.
+ * Maps each of the 15 `DocumentCategoryGroup` entries to a distinctive vector icon.
  */
 fun categoryGroupIcon(group: DocumentCategoryGroup): ImageVector {
     return when (group) {
         DocumentCategoryGroup.PERSONAL -> Icons.Default.Badge
         DocumentCategoryGroup.EDUCATION -> Icons.Default.School
         DocumentCategoryGroup.FINANCIAL -> Icons.Default.AccountBalance
+        DocumentCategoryGroup.TAX_ACCOUNTING -> Icons.Default.ReceiptLong
         DocumentCategoryGroup.MEDICAL -> Icons.Default.HealthAndSafety
+        DocumentCategoryGroup.INSURANCE -> Icons.Default.Shield
         DocumentCategoryGroup.EMPLOYMENT -> Icons.Default.WorkOutline
+        DocumentCategoryGroup.BUSINESS -> Icons.Default.BusinessCenter
         DocumentCategoryGroup.LEGAL -> Icons.Default.Gavel
+        DocumentCategoryGroup.PROPERTY -> Icons.Default.Apartment
         DocumentCategoryGroup.TRAVEL -> Icons.Default.FlightTakeoff
         DocumentCategoryGroup.VEHICLE -> Icons.Default.DirectionsCar
+        DocumentCategoryGroup.HOME_UTILITIES -> Icons.Default.HomeRepairService
+        DocumentCategoryGroup.DIGITAL_LICENSES -> Icons.Default.VpnKey
         DocumentCategoryGroup.OTHER -> Icons.Default.Description
     }
 }
 
 /**
- * Document category icon badge for all 9 category groups.
+ * Document category icon badge for all 15 category groups.
  */
 @Composable
 fun DocumentCategoryIconBox(
@@ -654,12 +666,13 @@ fun formatCompactFileSize(bytes: Long): String {
 
 /**
  * Apple-inspired responsive Document Row Card supporting:
- * - Category icon badge
+ * - Category icon badge (15 categories)
  * - Format badge (PDF, DOCX, XLSX, JPG, etc.)
  * - File size & subtype
  * - Expiry status badge
  * - Favourite indicator
  * - Multi-select mode checkbox & long-press bulk selection
+ * - Customizable corner radius, density, and border contrast
  */
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
@@ -679,25 +692,26 @@ fun SafeAreaDocumentRowCard(
     modifier: Modifier = Modifier
 ) {
     val palette = LocalSafeAreaPalette.current
+    val cardShape = RoundedCornerShape(palette.cardCornerRadius)
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
+            .clip(cardShape)
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick
             ),
-        shape = RoundedCornerShape(18.dp),
+        shape = cardShape,
         color = if (isSelected) palette.primary.copy(alpha = 0.10f) else palette.surface,
         border = BorderStroke(
-            width = if (isSelected) 1.8.dp else 1.1.dp,
-            color = if (isSelected) palette.primary else palette.border.copy(alpha = 0.28f)
+            width = if (isSelected) 1.8.dp else palette.borderWidth,
+            color = if (isSelected) palette.primary else palette.border.copy(alpha = palette.borderAlpha)
         )
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
+                .padding(horizontal = 14.dp, vertical = palette.cardVerticalPadding),
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (isSelectionMode) {

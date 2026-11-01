@@ -35,12 +35,15 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.DriveFileMove
 import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.HealthAndSafety
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material.icons.filled.ViewList
@@ -72,6 +75,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.DocumentCategoryGroup
 import com.example.data.DocumentWithFields
+import com.example.data.EmergencyIceProfile
 import com.example.data.LockMethod
 import com.example.data.SupportedFileFormatGroup
 import com.example.ui.ExpiryFilter
@@ -89,9 +93,11 @@ import com.example.ui.theme.LocalSafeAreaPalette
 /**
  * Home Vault Dashboard:
  * - Responsive Apple-inspired layout adapting to phone & tablet widths
+ * - Customizable Vault Title & Tagline
  * - Live device-local date & time
- * - Vault security status card
- * - Interactive 9 Document Category Groups grid with individual icons and live document counters
+ * - Vault Security Status & Readiness Score (0–100%)
+ * - Quick Emergency ICE (In Case of Emergency) Medical & Contact Card
+ * - Interactive 15 Document Category Groups grid with individual icons and live document counters
  * - Expiring / Expired alerts
  * - Recently Opened & My Documents list (zero demo/placeholder data)
  */
@@ -107,7 +113,8 @@ fun HomeVaultScreen(
     onQuickScan: () -> Unit,
     onOpenSettings: () -> Unit,
     onLockVaultNow: () -> Unit,
-    onConfigureSecurity: () -> Unit
+    onConfigureSecurity: () -> Unit,
+    onSaveIceProfile: (EmergencyIceProfile) -> Unit = {}
 ) {
     val palette = LocalSafeAreaPalette.current
     val activeDocs = remember(documents) { documents.filter { !it.document.archived } }
@@ -129,6 +136,18 @@ fun HomeVaultScreen(
         }
     }
 
+    val securityReadinessScore = remember(uiState, activeDocs, expiringDocs) {
+        var score = 35 // Base Android Keystore AES-256-GCM hardware encryption
+        if (uiState.hasPinSet || uiState.hasPatternSet) score += 25
+        if (uiState.appLockEnabled) score += 15
+        if (uiState.biometricEnabled) score += 10
+        if (uiState.emergencyIceProfile.isConfigured) score += 10
+        if (expiringDocs.none { (daysUntilExpiry(it.document.expiryDate) ?: 1L) < 0L }) score += 5
+        score.coerceIn(0, 100)
+    }
+
+    var showEmergencyIceModal by remember { mutableStateOf(false) }
+
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
@@ -136,7 +155,7 @@ fun HomeVaultScreen(
     ) {
         val isWideScreen = maxWidth >= 600.dp
         val maxContentWidth = if (isWideScreen) 720.dp else 540.dp
-        val categoryColumns = if (isWideScreen) 3 else 3
+        val categoryColumns = 3
 
         Column(
             modifier = Modifier
@@ -150,7 +169,7 @@ fun HomeVaultScreen(
                     .fillMaxWidth()
                     .widthIn(max = maxContentWidth)
             ) {
-                // Top Header Bar
+                // Top Header Bar with Customizable Vault Title & Tagline
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -164,22 +183,36 @@ fun HomeVaultScreen(
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Text(
-                                text = "SAFEAREA",
+                                text = uiState.customVaultTitle,
                                 style = MaterialTheme.typography.headlineMedium.copy(
                                     fontWeight = FontWeight.ExtraBold,
                                     letterSpacing = 0.5.sp
                                 ),
-                                color = palette.ink
+                                color = palette.ink,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = "Personal Document Vault",
+                                text = uiState.customVaultTagline,
                                 style = MaterialTheme.typography.bodySmall,
-                                color = palette.inkMuted
+                                color = palette.inkMuted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = { showEmergencyIceModal = true },
+                            modifier = Modifier.testTag("home_ice_card_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.HealthAndSafety,
+                                contentDescription = "Emergency ICE Card",
+                                tint = palette.primary
+                            )
+                        }
                         IconButton(
                             onClick = onLockVaultNow,
                             modifier = Modifier.testTag("lock_now_button")
@@ -206,12 +239,42 @@ fun HomeVaultScreen(
 
                 Spacer(modifier = Modifier.height(6.dp))
 
-                Text(
-                    text = uiState.liveDateTimeText,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = palette.inkMuted,
-                    modifier = Modifier.testTag("live_date_time_text")
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = uiState.liveDateTimeText,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = palette.inkMuted,
+                        modifier = Modifier.testTag("live_date_time_text")
+                    )
+                    if (uiState.showSecurityScoreCard) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = palette.successContainer
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Shield,
+                                    contentDescription = null,
+                                    tint = palette.success,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Health $securityReadinessScore%",
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = palette.onSuccessContainer
+                                )
+                            }
+                        }
+                    }
+                }
 
                 Spacer(modifier = Modifier.height(12.dp))
 
@@ -224,17 +287,18 @@ fun HomeVaultScreen(
                     else -> "Protected with ${uiState.primaryLockMethod.title} · AES-256 Keystore"
                 }
 
+                val bannerShape = RoundedCornerShape(palette.cardCornerRadius)
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(20.dp))
+                        .clip(bannerShape)
                         .clickable {
                             if (statusProtected) onLockVaultNow() else onConfigureSecurity()
                         }
                         .testTag("vault_status_card"),
-                    shape = RoundedCornerShape(20.dp),
+                    shape = bannerShape,
                     color = palette.successContainer,
-                    border = BorderStroke(1.1.dp, palette.success.copy(alpha = 0.45f))
+                    border = BorderStroke(palette.borderWidth, palette.success.copy(alpha = 0.45f))
                 ) {
                     Row(
                         modifier = Modifier
@@ -286,9 +350,9 @@ fun HomeVaultScreen(
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
+                            .clip(RoundedCornerShape(palette.cardCornerRadius))
                             .clickable { onOpenDocument(firstExpiring.id) },
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(palette.cardCornerRadius),
                         color = palette.warningContainer,
                         border = BorderStroke(1.dp, palette.warning)
                     ) {
@@ -330,13 +394,13 @@ fun HomeVaultScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Quick Action Bar (Scan with Camera, Import Any File, Search Vault)
+                // Quick Action Bar (Native Camera, Import File, Search Vault, Emergency ICE)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     QuickDashboardTile(
-                        title = "Scan Camera",
+                        title = "Native Camera",
                         icon = Icons.Default.CameraAlt,
                         onClick = onQuickScan,
                         modifier = Modifier
@@ -359,78 +423,89 @@ fun HomeVaultScreen(
                             .weight(1f)
                             .testTag("home_quick_search_button")
                     )
-                }
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                // Document Categories Section (All 9 Category Groups with Individual Icons & Live Counters)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Document Categories",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
-                        color = palette.ink
-                    )
-                    Text(
-                        text = "${activeDocs.size} total stored",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = palette.inkMuted
+                    QuickDashboardTile(
+                        title = "ICE Card",
+                        icon = Icons.Default.HealthAndSafety,
+                        onClick = { showEmergencyIceModal = true },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("home_quick_ice_button")
                     )
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                // Document Categories Section (All 15 Category Groups with Individual Icons & Live Counters)
+                if (uiState.showCategoryGridOnHome) {
+                    Spacer(modifier = Modifier.height(20.dp))
 
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    maxItemsInEachRow = categoryColumns
-                ) {
-                    DocumentCategoryGroup.entries.forEach { group ->
-                        val count = categoryCounts[group] ?: 0
-                        Surface(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(16.dp))
-                                .clickable { onOpenCategory(group.title) }
-                                .testTag("category_card_${group.name.lowercase()}"),
-                            shape = RoundedCornerShape(16.dp),
-                            color = palette.surface,
-                            border = BorderStroke(1.dp, palette.border.copy(alpha = 0.25f))
-                        ) {
-                            Column(
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Document Categories (15)",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
+                            color = palette.ink
+                        )
+                        Text(
+                            text = "${activeDocs.size} total stored",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = palette.inkMuted
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        maxItemsInEachRow = categoryColumns
+                    ) {
+                        DocumentCategoryGroup.entries.forEach { group ->
+                            val count = categoryCounts[group] ?: 0
+                            val tileShape = RoundedCornerShape(palette.cardCornerRadius)
+                            Surface(
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 10.dp, vertical = 12.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
+                                    .weight(1f)
+                                    .clip(tileShape)
+                                    .clickable { onOpenCategory(group.title) }
+                                    .testTag("category_card_${group.name.lowercase()}"),
+                                shape = tileShape,
+                                color = palette.surface,
+                                border = BorderStroke(palette.borderWidth, palette.border.copy(alpha = palette.borderAlpha))
                             ) {
-                                DocumentCategoryIconBox(
-                                    categoryGroup = group,
-                                    size = 38.dp
-                                )
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text(
-                                    text = group.shortTitle,
-                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                                    color = palette.ink,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    textAlign = TextAlign.Center
-                                )
-                                Text(
-                                    text = if (count == 1) "1 doc" else "$count docs",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = if (count > 0) palette.primary else palette.inkMuted
-                                )
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 10.dp, vertical = 12.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    DocumentCategoryIconBox(
+                                        categoryGroup = group,
+                                        size = 38.dp
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = group.shortTitle,
+                                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                                        color = palette.ink,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        textAlign = TextAlign.Center
+                                    )
+                                    Text(
+                                        text = if (count == 1) "1 doc" else "$count docs",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = if (count > 0) palette.primary else palette.inkMuted
+                                    )
+                                }
                             }
                         }
                     }
                 }
 
-                // Recently Opened Section (when documents have been opened)
+                // Recently Opened Section
                 if (recentlyOpenedDocs.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(20.dp))
                     Text(
@@ -439,7 +514,7 @@ fun HomeVaultScreen(
                         color = palette.ink
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(palette.itemSpacing)) {
                         recentlyOpenedDocs.forEach { item ->
                             val doc = item.document
                             SafeAreaDocumentRowCard(
@@ -496,9 +571,9 @@ fun HomeVaultScreen(
                 if (activeDocs.isEmpty()) {
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(20.dp),
+                        shape = RoundedCornerShape(palette.cardCornerRadius),
                         color = palette.surface,
-                        border = BorderStroke(1.1.dp, palette.border.copy(alpha = 0.28f))
+                        border = BorderStroke(palette.borderWidth, palette.border.copy(alpha = palette.borderAlpha))
                     ) {
                         Column(
                             modifier = Modifier.padding(22.dp),
@@ -511,7 +586,7 @@ fun HomeVaultScreen(
                             )
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
-                                text = "Scan IDs, passports, certificates, or import PDF, Word, Excel, PowerPoint, and image files into your encrypted on-device vault.",
+                                text = "Click document photos with your native Android camera or import PDF, Word, Excel, PowerPoint, and image files into your encrypted on-device vault.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = palette.inkMuted,
                                 textAlign = TextAlign.Center
@@ -526,7 +601,7 @@ fun HomeVaultScreen(
                         }
                     }
                 } else {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(palette.itemSpacing)) {
                         activeDocs.take(8).forEach { item ->
                             val doc = item.document
                             val daysLeft = daysUntilExpiry(doc.expiryDate)
@@ -572,6 +647,108 @@ fun HomeVaultScreen(
             }
         }
     }
+
+    if (showEmergencyIceModal) {
+        val currentIce = uiState.emergencyIceProfile
+        var fullName by remember(currentIce) { mutableStateOf(currentIce.fullName) }
+        var bloodGroup by remember(currentIce) { mutableStateOf(currentIce.bloodGroup) }
+        var allergies by remember(currentIce) { mutableStateOf(currentIce.allergies) }
+        var emergencyContact by remember(currentIce) { mutableStateOf(currentIce.emergencyContact) }
+        var medicalConditions by remember(currentIce) { mutableStateOf(currentIce.medicalConditions) }
+        var insurancePolicyNo by remember(currentIce) { mutableStateOf(currentIce.insurancePolicyNo) }
+
+        AlertDialog(
+            onDismissRequest = { showEmergencyIceModal = false },
+            containerColor = palette.surface,
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.HealthAndSafety, contentDescription = null, tint = palette.primary)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Emergency ICE Card")
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "Store critical In-Case-of-Emergency (ICE) details locally for instant access.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = palette.inkMuted
+                    )
+                    OutlinedTextField(
+                        value = fullName,
+                        onValueChange = { fullName = it },
+                        label = { Text("Full Name") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = bloodGroup,
+                        onValueChange = { bloodGroup = it },
+                        label = { Text("Blood Group (e.g. O+, A-, B+)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = emergencyContact,
+                        onValueChange = { emergencyContact = it },
+                        label = { Text("Emergency Contact Name & Phone") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = allergies,
+                        onValueChange = { allergies = it },
+                        label = { Text("Allergies / Medications") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = medicalConditions,
+                        onValueChange = { medicalConditions = it },
+                        label = { Text("Medical Notes / Conditions") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = insurancePolicyNo,
+                        onValueChange = { insurancePolicyNo = it },
+                        label = { Text("Health Insurance Policy / ID") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onSaveIceProfile(
+                            EmergencyIceProfile(
+                                fullName = fullName,
+                                bloodGroup = bloodGroup,
+                                allergies = allergies,
+                                emergencyContact = emergencyContact,
+                                medicalConditions = medicalConditions,
+                                insurancePolicyNo = insurancePolicyNo
+                            )
+                        )
+                        showEmergencyIceModal = false
+                    }
+                ) {
+                    Text("Save ICE Card", color = palette.primary, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEmergencyIceModal = false }) {
+                    Text("Close", color = palette.inkMuted)
+                }
+            }
+        )
+    }
 }
 
 @Composable
@@ -582,18 +759,19 @@ private fun QuickDashboardTile(
     modifier: Modifier = Modifier
 ) {
     val palette = LocalSafeAreaPalette.current
+    val shape = RoundedCornerShape(palette.cardCornerRadius)
     Surface(
         modifier = modifier
-            .clip(RoundedCornerShape(16.dp))
+            .clip(shape)
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(16.dp),
+        shape = shape,
         color = palette.surface,
-        border = BorderStroke(1.dp, palette.border.copy(alpha = 0.28f))
+        border = BorderStroke(palette.borderWidth, palette.border.copy(alpha = palette.borderAlpha))
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 12.dp),
+                .padding(horizontal = 6.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Icon(
@@ -605,7 +783,7 @@ private fun QuickDashboardTile(
             Spacer(modifier = Modifier.height(6.dp))
             Text(
                 text = title,
-                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                 color = palette.ink,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -618,9 +796,9 @@ private fun QuickDashboardTile(
 /**
  * Full Documents Library Screen:
  * - Search by name, category, subtype, file format/extension, tags, or field values
- * - Filter by Category, File Format, Expiry Status, Favourites, Recently Opened, Archived
+ * - Filter by 15 Categories + Custom Categories, File Format, Expiry Status, Favourites, Recently Opened, Archived
  * - Sort by Modified Date, Date Added, Name (A–Z), File Size, Expiry Date
- * - Multi-Document Selection & Bulk Actions (Bulk Move Category, Bulk Archive/Restore, Bulk Delete)
+ * - Multi-Document Selection & Bulk Actions (Compile PDF Packet, Bulk Move Category, Bulk Archive/Restore, Bulk Delete)
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -642,6 +820,7 @@ fun DocumentsLibraryScreen(
     onBulkDeleteSelected: () -> Unit,
     onBulkArchiveSelected: (Boolean) -> Unit,
     onBulkMoveCategorySelected: (String) -> Unit,
+    onCompilePdfPacketSelected: (String) -> Unit = {},
     onAddCustomCategory: (String) -> Unit,
     onOpenDocument: (Long) -> Unit,
     onAddDocument: () -> Unit
@@ -651,6 +830,8 @@ fun DocumentsLibraryScreen(
     var newCategoryName by remember { mutableStateOf("") }
     var showBulkMoveDialog by remember { mutableStateOf(false) }
     var showBulkDeleteDialog by remember { mutableStateOf(false) }
+    var showCompilePacketDialog by remember { mutableStateOf(false) }
+    var packetTitleInput by remember { mutableStateOf("SAFEAREA Document Packet") }
 
     val filteredDocs = remember(
         documents,
@@ -781,13 +962,13 @@ fun DocumentsLibraryScreen(
                     }
                 }
 
-                // Multi-Document Bulk Actions Bar
+                // Multi-Document Bulk Actions Bar (Includes PDF Packet Compiler)
                 if (uiState.isBulkSelectionActive) {
                     Spacer(modifier = Modifier.height(10.dp))
                     Surface(
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(palette.cardCornerRadius),
                         color = palette.surface,
-                        border = BorderStroke(1.2.dp, palette.primary),
+                        border = BorderStroke(1.4.dp, palette.primary),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
@@ -805,7 +986,14 @@ fun DocumentsLibraryScreen(
                                 Text("All (${filteredDocs.size})")
                             }
 
-                            Row {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(onClick = { showCompilePacketDialog = true }) {
+                                    Icon(
+                                        imageVector = Icons.Default.PictureAsPdf,
+                                        contentDescription = "Compile selected into PDF Packet",
+                                        tint = palette.primary
+                                    )
+                                }
                                 IconButton(onClick = { showBulkMoveDialog = true }) {
                                     Icon(
                                         imageVector = Icons.Default.DriveFileMove,
@@ -855,7 +1043,7 @@ fun DocumentsLibraryScreen(
                         }
                     },
                     singleLine = true,
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(palette.cardCornerRadius),
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("documents_search_input")
@@ -863,7 +1051,7 @@ fun DocumentsLibraryScreen(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // 1. Category Filter Row
+                // 1. Category Filter Row (15 Categories + Custom)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -892,7 +1080,7 @@ fun DocumentsLibraryScreen(
 
                 Spacer(modifier = Modifier.height(6.dp))
 
-                // 2. File Format Filter Row (PDF, Images, Word, Excel, PowerPoint, Text/Data)
+                // 2. File Format Filter Row
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -988,9 +1176,9 @@ fun DocumentsLibraryScreen(
                 if (filteredDocs.isEmpty()) {
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(18.dp),
+                        shape = RoundedCornerShape(palette.cardCornerRadius),
                         color = palette.surface,
-                        border = BorderStroke(1.dp, palette.border.copy(alpha = 0.28f))
+                        border = BorderStroke(palette.borderWidth, palette.border.copy(alpha = palette.borderAlpha))
                     ) {
                         Column(
                             modifier = Modifier.padding(24.dp),
@@ -1026,10 +1214,11 @@ fun DocumentsLibraryScreen(
                         filteredDocs.forEach { item ->
                             val doc = item.document
                             val isSelected = doc.id in uiState.selectedBulkDocIds
+                            val gridShape = RoundedCornerShape(palette.cardCornerRadius)
                             Surface(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .clip(RoundedCornerShape(18.dp))
+                                    .clip(gridShape)
                                     .clickable {
                                         if (uiState.isBulkSelectionActive) {
                                             onToggleBulkSelection(doc.id)
@@ -1037,11 +1226,11 @@ fun DocumentsLibraryScreen(
                                             onOpenDocument(doc.id)
                                         }
                                     },
-                                shape = RoundedCornerShape(18.dp),
+                                shape = gridShape,
                                 color = if (isSelected) palette.primary.copy(alpha = 0.1f) else palette.surface,
                                 border = BorderStroke(
-                                    if (isSelected) 1.8.dp else 1.1.dp,
-                                    if (isSelected) palette.primary else palette.border.copy(alpha = 0.3f)
+                                    if (isSelected) 1.8.dp else palette.borderWidth,
+                                    if (isSelected) palette.primary else palette.border.copy(alpha = palette.borderAlpha)
                                 )
                             ) {
                                 Column(modifier = Modifier.padding(14.dp)) {
@@ -1092,7 +1281,7 @@ fun DocumentsLibraryScreen(
                         }
                     }
                 } else {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(palette.itemSpacing)) {
                         filteredDocs.forEach { item ->
                             val doc = item.document
                             val daysLeft = daysUntilExpiry(doc.expiryDate)
@@ -1130,6 +1319,45 @@ fun DocumentsLibraryScreen(
                 Spacer(modifier = Modifier.height(24.dp))
             }
         }
+    }
+
+    if (showCompilePacketDialog) {
+        AlertDialog(
+            onDismissRequest = { showCompilePacketDialog = false },
+            containerColor = palette.surface,
+            title = { Text("Compile ${uiState.selectedBulkDocIds.size} Document(s) into PDF Packet") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Creates a multi-page printable PDF dossier combining metadata and attached document scans.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = palette.inkMuted
+                    )
+                    OutlinedTextField(
+                        value = packetTitleInput,
+                        onValueChange = { packetTitleInput = it },
+                        label = { Text("PDF Packet Title") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showCompilePacketDialog = false
+                        onCompilePdfPacketSelected(packetTitleInput)
+                    }
+                ) {
+                    Text("Compile & Share PDF", color = palette.primary, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCompilePacketDialog = false }) {
+                    Text("Cancel", color = palette.inkMuted)
+                }
+            }
+        )
     }
 
     if (showNewCategoryDialog) {

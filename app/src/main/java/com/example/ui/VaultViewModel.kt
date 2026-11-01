@@ -22,13 +22,19 @@ import com.example.data.DocumentCategoryGroup
 import com.example.data.DocumentEntity
 import com.example.data.DocumentFieldEntity
 import com.example.data.DocumentWithFields
+import com.example.data.EmergencyIceProfile
+import com.example.data.ExportFormat
 import com.example.data.FieldSource
 import com.example.data.LockMethod
 import com.example.data.SupportedFileFormatGroup
 import com.example.data.VaultDatabase
 import com.example.data.VaultRepository
 import com.example.ui.theme.AppearanceMode
+import com.example.ui.theme.BorderContrastStyle
+import com.example.ui.theme.CardDensityStyle
+import com.example.ui.theme.CornerRadiusStyle
 import com.example.ui.theme.VaultThemeId
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,6 +44,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -85,6 +92,14 @@ data class VaultUiState(
     val unlockErrorMessage: String? = null,
     val selectedTheme: VaultThemeId = VaultThemeId.CREAM,
     val appearanceMode: AppearanceMode = AppearanceMode.LIGHT,
+    val cornerRadiusStyle: CornerRadiusStyle = CornerRadiusStyle.APPLE_ROUNDED,
+    val cardDensityStyle: CardDensityStyle = CardDensityStyle.COMFORTABLE,
+    val borderContrastStyle: BorderContrastStyle = BorderContrastStyle.STANDARD,
+    val customVaultTitle: String = "SAFEAREA",
+    val customVaultTagline: String = "Personal Document Vault",
+    val showSecurityScoreCard: Boolean = true,
+    val showCategoryGridOnHome: Boolean = true,
+    val emergencyIceProfile: EmergencyIceProfile = EmergencyIceProfile(),
     val autoLockTimeoutSeconds: Int = 60,
     val lockOnBackground: Boolean = true,
     val hideInAppSwitcher: Boolean = false,
@@ -170,6 +185,14 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
                 hasPatternSet = cryptoStorage.hasPatternConfigured(),
                 selectedTheme = cryptoStorage.selectedTheme,
                 appearanceMode = cryptoStorage.appearanceMode,
+                cornerRadiusStyle = cryptoStorage.cornerRadiusStyle,
+                cardDensityStyle = cryptoStorage.cardDensityStyle,
+                borderContrastStyle = cryptoStorage.borderContrastStyle,
+                customVaultTitle = cryptoStorage.customVaultTitle,
+                customVaultTagline = cryptoStorage.customVaultTagline,
+                showSecurityScoreCard = cryptoStorage.showSecurityScoreCard,
+                showCategoryGridOnHome = cryptoStorage.showCategoryGridOnHome,
+                emergencyIceProfile = cryptoStorage.emergencyIceProfile,
                 autoLockTimeoutSeconds = cryptoStorage.autoLockTimeoutSeconds,
                 lockOnBackground = cryptoStorage.lockOnBackground,
                 hideInAppSwitcher = cryptoStorage.hideInAppSwitcher,
@@ -484,7 +507,7 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // --- Theme & Settings ---
+    // --- Theme & Full UI Customization ---
 
     fun setTheme(theme: VaultThemeId) {
         cryptoStorage.selectedTheme = theme
@@ -494,6 +517,51 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
     fun setAppearanceMode(mode: AppearanceMode) {
         cryptoStorage.appearanceMode = mode
         _uiState.update { it.copy(appearanceMode = mode) }
+    }
+
+    fun setCornerRadiusStyle(style: CornerRadiusStyle) {
+        cryptoStorage.cornerRadiusStyle = style
+        _uiState.update { it.copy(cornerRadiusStyle = style) }
+    }
+
+    fun setCardDensityStyle(style: CardDensityStyle) {
+        cryptoStorage.cardDensityStyle = style
+        _uiState.update { it.copy(cardDensityStyle = style) }
+    }
+
+    fun setBorderContrastStyle(style: BorderContrastStyle) {
+        cryptoStorage.borderContrastStyle = style
+        _uiState.update { it.copy(borderContrastStyle = style) }
+    }
+
+    fun updateCustomVaultBranding(title: String, tagline: String) {
+        val cleanTitle = title.trim().ifBlank { "SAFEAREA" }
+        val cleanTagline = tagline.trim().ifBlank { "Personal Document Vault" }
+        cryptoStorage.customVaultTitle = cleanTitle
+        cryptoStorage.customVaultTagline = cleanTagline
+        _uiState.update {
+            it.copy(
+                customVaultTitle = cleanTitle,
+                customVaultTagline = cleanTagline
+            )
+        }
+        showStatusMessage("Updated vault branding")
+    }
+
+    fun setShowSecurityScoreCard(enabled: Boolean) {
+        cryptoStorage.showSecurityScoreCard = enabled
+        _uiState.update { it.copy(showSecurityScoreCard = enabled) }
+    }
+
+    fun setShowCategoryGridOnHome(enabled: Boolean) {
+        cryptoStorage.showCategoryGridOnHome = enabled
+        _uiState.update { it.copy(showCategoryGridOnHome = enabled) }
+    }
+
+    fun saveEmergencyIceProfile(profile: EmergencyIceProfile) {
+        cryptoStorage.emergencyIceProfile = profile
+        _uiState.update { it.copy(emergencyIceProfile = profile) }
+        showStatusMessage("Saved Emergency ICE Card")
     }
 
     fun setUseSystemFont(enabled: Boolean) {
@@ -813,7 +881,7 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
 
             val frontInfo = frontRes.getOrNull()
             if (frontInfo == null) {
-                showStatusMessage("Failed to save captured camera scan.")
+                showStatusMessage("Failed to save captured camera photo.")
                 return@launch
             }
             val backInfo = backRes?.getOrNull()
@@ -860,7 +928,7 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
                     isOcrReviewMode = ocrFields.any { f -> !f.userConfirmed }
                 )
             }
-            showStatusMessage("Camera scan saved. Complete document details below.")
+            showStatusMessage("Camera photo saved. Complete document details below.")
             navigateTo(SafeAreaScreen.DOCUMENT_EDITOR)
             refreshStorageStats()
         }
@@ -1002,7 +1070,7 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
         copyTextToClipboard(doc.title, sb.toString().trim())
     }
 
-    // --- Native Open in External Viewer & Share/Export ---
+    // --- Native Open in External Viewer & Multi-Format Export (PDF, CSV, TXT, MD, HTML, JSON, XML) ---
 
     fun openDocumentInExternalViewer(context: Context, doc: DocumentEntity) {
         if (doc.frontFileRef.isBlank()) {
@@ -1080,32 +1148,97 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun exportEncryptedVaultBackup(context: Context) {
+    fun shareVaultExportInFormat(context: Context, format: ExportFormat) {
         viewModelScope.launch {
             runCatching {
-                val backupFile = repository.exportVaultBackupJson()
+                val exportedFile = repository.exportVaultData(format)
                 val uri = FileProvider.getUriForFile(
                     context,
                     "${context.packageName}.fileprovider",
-                    backupFile
+                    exportedFile
                 )
                 val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                    type = "application/json"
+                    type = format.mimeType
                     putExtra(Intent.EXTRA_STREAM, uri)
-                    putExtra(Intent.EXTRA_SUBJECT, "SAFEAREA Vault Backup")
+                    putExtra(Intent.EXTRA_SUBJECT, "${_uiState.value.customVaultTitle} Export (${format.badge})")
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
                 context.startActivity(
-                    Intent.createChooser(shareIntent, "Export SAFEAREA Backup").apply {
+                    Intent.createChooser(shareIntent, "Export Vault as ${format.badge}").apply {
                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     }
                 )
-                showStatusMessage("Backup exported")
+                showStatusMessage("Exported vault as ${format.badge} (.${format.extension})")
                 refreshStorageStats()
-            }.onFailure {
-                showStatusMessage("Could not export backup.")
+            }.onFailure { err ->
+                showStatusMessage("Export failed: ${err.localizedMessage ?: "unknown error"}")
             }
         }
+    }
+
+    fun saveVaultExportToUri(context: Context, format: ExportFormat, targetUri: Uri) {
+        viewModelScope.launch {
+            runCatching {
+                val exportedFile = repository.exportVaultData(format)
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.openOutputStream(targetUri)?.use { out ->
+                        exportedFile.inputStream().use { input ->
+                            input.copyTo(out)
+                        }
+                    } ?: throw IllegalArgumentException("Could not open target file for writing.")
+                }
+                showStatusMessage("Saved ${format.badge} export (.${format.extension}) to device")
+                refreshStorageStats()
+            }.onFailure { err ->
+                showStatusMessage("Could not save export: ${err.localizedMessage ?: "check storage access"}")
+            }
+        }
+    }
+
+    fun compileAndShareDocumentPacketPdf(
+        context: Context,
+        packetTitle: String,
+        docIds: Set<Long>
+    ) {
+        val selectedDocs = if (docIds.isEmpty()) {
+            documentsWithFields.value.filter { !it.document.archived }
+        } else {
+            documentsWithFields.value.filter { it.document.id in docIds }
+        }
+        if (selectedDocs.isEmpty()) {
+            showStatusMessage("Select at least one document to compile a PDF packet.")
+            return
+        }
+        viewModelScope.launch {
+            runCatching {
+                val pdfFile = repository.compileDocumentsPacketPdf(packetTitle, selectedDocs)
+                val uri = FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    pdfFile
+                )
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = "application/pdf"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    putExtra(Intent.EXTRA_SUBJECT, packetTitle.ifBlank { "SAFEAREA Document Packet" })
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                context.startActivity(
+                    Intent.createChooser(shareIntent, "Share Compiled PDF Packet").apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                )
+                clearBulkSelection()
+                showStatusMessage("Compiled PDF packet (${selectedDocs.size} docs)")
+                refreshStorageStats()
+            }.onFailure { err ->
+                showStatusMessage("Could not compile PDF packet: ${err.localizedMessage ?: ""}")
+            }
+        }
+    }
+
+    fun exportEncryptedVaultBackup(context: Context) {
+        shareVaultExportInFormat(context, ExportFormat.JSON)
     }
 
     // --- Storage & Expiry Helpers ---

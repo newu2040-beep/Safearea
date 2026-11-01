@@ -16,6 +16,76 @@ enum class FieldSource {
     OCR
 }
 
+enum class ExportFormat(
+    val label: String,
+    val badge: String,
+    val extension: String,
+    val mimeType: String,
+    val description: String
+) {
+    PDF(
+        label = "PDF Report (.pdf)",
+        badge = "PDF",
+        extension = "pdf",
+        mimeType = "application/pdf",
+        description = "Printable multi-page PDF report of your documents & fields"
+    ),
+    CSV(
+        label = "CSV Spreadsheet (.csv)",
+        badge = "CSV",
+        extension = "csv",
+        mimeType = "text/csv",
+        description = "Spreadsheet compatible with Excel, Google Sheets & Numbers"
+    ),
+    TXT(
+        label = "Plain Text (.txt)",
+        badge = "TXT",
+        extension = "txt",
+        mimeType = "text/plain",
+        description = "Clean, human-readable text report of all vault records"
+    ),
+    MARKDOWN(
+        label = "Markdown (.md)",
+        badge = "MD",
+        extension = "md",
+        mimeType = "text/markdown",
+        description = "Formatted Markdown tables & sections for Notion / Obsidian"
+    ),
+    HTML(
+        label = "HTML Web Report (.html)",
+        badge = "HTML",
+        extension = "html",
+        mimeType = "text/html",
+        description = "Styled standalone HTML document viewable in any browser"
+    ),
+    JSON(
+        label = "JSON Backup (.json)",
+        badge = "JSON",
+        extension = "json",
+        mimeType = "application/json",
+        description = "Structured machine-readable JSON vault archive"
+    ),
+    XML(
+        label = "XML Archive (.xml)",
+        badge = "XML",
+        extension = "xml",
+        mimeType = "application/xml",
+        description = "Standard XML data interchange export of all documents"
+    )
+}
+
+data class EmergencyIceProfile(
+    val fullName: String = "",
+    val bloodGroup: String = "",
+    val allergies: String = "",
+    val emergencyContact: String = "",
+    val medicalConditions: String = "",
+    val insurancePolicyNo: String = ""
+) {
+    val isConfigured: Boolean
+        get() = fullName.isNotBlank() || bloodGroup.isNotBlank() || emergencyContact.isNotBlank() || allergies.isNotBlank()
+}
+
 enum class DocumentCategoryGroup(
     val title: String,
     val shortTitle: String,
@@ -36,7 +106,9 @@ enum class DocumentCategoryGroup(
             "Marriage Certificate",
             "National Identity Card",
             "Personal Identification Documents",
-            "Voter ID"
+            "Voter ID",
+            "Social Security / PAN Card",
+            "Family Relationship Certificate"
         )
     ),
     EDUCATION(
@@ -52,7 +124,9 @@ enum class DocumentCategoryGroup(
             "Transcripts",
             "Mark Sheets",
             "Training Certificates",
-            "Diplomas"
+            "Diplomas",
+            "Student ID Card",
+            "Scholarship Letters"
         )
     ),
     FINANCIAL(
@@ -68,7 +142,24 @@ enum class DocumentCategoryGroup(
             "Receipts",
             "Payment Records",
             "Insurance Documents",
-            "Financial Agreements"
+            "Financial Agreements",
+            "Loan & Mortgage Records",
+            "Investment & Portfolio Statements"
+        )
+    ),
+    TAX_ACCOUNTING(
+        title = "Tax & Accounting",
+        shortTitle = "Tax & Audit",
+        badgeHex = 0xFFE3F2DE,
+        iconTintHex = 0xFF2E6B34,
+        subtypes = listOf(
+            "Income Tax Returns",
+            "PAN / Tax Registration Card",
+            "VAT / GST Filings",
+            "Tax Clearance Certificate",
+            "TDS / Withholding Certificates",
+            "Audit Reports",
+            "Charitable Donation Receipts"
         )
     ),
     MEDICAL(
@@ -82,7 +173,25 @@ enum class DocumentCategoryGroup(
             "Laboratory Reports",
             "Vaccination Records",
             "Health Insurance Cards",
-            "Medical Certificates"
+            "Medical Certificates",
+            "Discharge Summary",
+            "Dental & Optical Records",
+            "Blood Group & Allergy Card"
+        )
+    ),
+    INSURANCE(
+        title = "Insurance Policies",
+        shortTitle = "Insurance",
+        badgeHex = 0xFFDEF0FA,
+        iconTintHex = 0xFF1F638F,
+        subtypes = listOf(
+            "Life Insurance Policy",
+            "Health / Medical Insurance",
+            "Term Insurance Certificate",
+            "Home & Property Insurance",
+            "Motor / Auto Insurance",
+            "Travel Insurance Policy",
+            "Insurance Claim Records"
         )
     ),
     EMPLOYMENT(
@@ -97,7 +206,24 @@ enum class DocumentCategoryGroup(
             "Salary Slips",
             "Professional Certificates",
             "Appointment Letters",
-            "Business Documents"
+            "Business Documents",
+            "Employee ID Badge",
+            "Relieving & Reference Letters"
+        )
+    ),
+    BUSINESS(
+        title = "Business & Corporate",
+        shortTitle = "Business",
+        badgeHex = 0xFFEDE2F8,
+        iconTintHex = 0xFF5D348C,
+        subtypes = listOf(
+            "Company Registration Certificate",
+            "Trade / Business Licence",
+            "Articles of Incorporation",
+            "Partnership Deed",
+            "Board Resolutions",
+            "Vendor & Client Contracts",
+            "Trademark & IP Certificates"
         )
     ),
     LEGAL(
@@ -113,7 +239,24 @@ enum class DocumentCategoryGroup(
             "Rental Agreements",
             "Affidavits",
             "Legal Notices",
-            "Power of Attorney"
+            "Power of Attorney",
+            "Will & Estate Documents",
+            "Court Orders & Judgments"
+        )
+    ),
+    PROPERTY(
+        title = "Property & Real Estate",
+        shortTitle = "Property",
+        badgeHex = 0xFFF5E6D6,
+        iconTintHex = 0xFF8C531E,
+        subtypes = listOf(
+            "Land Ownership Deed (Lalpurja)",
+            "House Sale / Purchase Deed",
+            "Lease / Tenancy Agreement",
+            "Property Tax Receipts",
+            "Building Blueprint & Permit",
+            "Home Valuation Report",
+            "Society / HOA Certificates"
         )
     ),
     TRAVEL(
@@ -127,7 +270,10 @@ enum class DocumentCategoryGroup(
             "Hotel Reservations",
             "Visa Documents",
             "Travel Insurance",
-            "Travel Itineraries"
+            "Travel Itineraries",
+            "International Driving Permit",
+            "Rail & Bus Passes",
+            "Foreign Exchange Receipts"
         )
     ),
     VEHICLE(
@@ -141,7 +287,38 @@ enum class DocumentCategoryGroup(
             "Bluebook",
             "Driving Permits",
             "Pollution Certificates",
-            "Vehicle Tax Records"
+            "Vehicle Tax Records",
+            "Service & Maintenance History",
+            "Roadside Assistance Card"
+        )
+    ),
+    HOME_UTILITIES(
+        title = "Home, Utilities & Warranties",
+        shortTitle = "Home & Bills",
+        badgeHex = 0xFFFFE9D6,
+        iconTintHex = 0xFFA64D14,
+        subtypes = listOf(
+            "Electricity & Water Bills",
+            "Internet & Telecom Bills",
+            "Appliance Warranty Cards",
+            "Electronics Purchase Invoices",
+            "Gas Connection Record",
+            "Home Repair & AMC Contracts"
+        )
+    ),
+    DIGITAL_LICENSES(
+        title = "Digital & Memberships",
+        shortTitle = "Digital & IDs",
+        badgeHex = 0xFFDDF3F5,
+        iconTintHex = 0xFF176A73,
+        subtypes = listOf(
+            "Software Licence Keys",
+            "Domain & Hosting Records",
+            "Professional Memberships",
+            "Library & Club Cards",
+            "Loyalty & Frequent Flyer Cards",
+            "Event & Conference Passes",
+            "Recovery Backup Codes"
         )
     ),
     OTHER(
@@ -170,12 +347,18 @@ enum class DocumentCategoryGroup(
             } ?: when {
                 lower.contains("personal") || lower.contains("identity") || lower.contains("citizen") || lower.contains("voter") -> PERSONAL
                 lower.contains("educat") || lower.contains("school") || lower.contains("college") || lower.contains("degree") || lower.contains("diploma") -> EDUCATION
-                lower.contains("financ") || lower.contains("bank") || lower.contains("tax") || lower.contains("invoice") || lower.contains("receipt") -> FINANCIAL
+                lower.contains("tax") || lower.contains("audit") || lower.contains("vat") || lower.contains("gst") -> TAX_ACCOUNTING
+                lower.contains("financ") || lower.contains("bank") || lower.contains("invoice") || lower.contains("receipt") -> FINANCIAL
+                lower.contains("insur") || lower.contains("policy") -> INSURANCE
                 lower.contains("medic") || lower.contains("health") || lower.contains("prescript") || lower.contains("vaccin") -> MEDICAL
+                lower.contains("business") || lower.contains("corporat") || lower.contains("company") || lower.contains("trade") -> BUSINESS
                 lower.contains("employ") || lower.contains("work") || lower.contains("resume") || lower.contains("salary") -> EMPLOYMENT
-                lower.contains("legal") || lower.contains("property") || lower.contains("land") || lower.contains("contract") || lower.contains("affidavit") -> LEGAL
+                lower.contains("property") || lower.contains("real estate") || lower.contains("lalpurja") || lower.contains("lease") -> PROPERTY
+                lower.contains("legal") || lower.contains("land") || lower.contains("contract") || lower.contains("affidavit") -> LEGAL
                 lower.contains("travel") || lower.contains("flight") || lower.contains("visa") || lower.contains("hotel") || lower.contains("boarding") -> TRAVEL
                 lower.contains("vehicle") || lower.contains("driv") || lower.contains("bluebook") || lower.contains("car") -> VEHICLE
+                lower.contains("home") || lower.contains("utilit") || lower.contains("warrant") || lower.contains("bill") -> HOME_UTILITIES
+                lower.contains("digital") || lower.contains("software") || lower.contains("member") -> DIGITAL_LICENSES
                 else -> OTHER
             }
         }

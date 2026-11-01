@@ -133,7 +133,10 @@ fun SafeAreaApp(
         themeId = uiState.selectedTheme,
         appearanceMode = uiState.appearanceMode,
         useSystemFont = uiState.useSystemFont,
-        fontScale = uiState.fontScale
+        fontScale = uiState.fontScale,
+        cornerRadiusStyle = uiState.cornerRadiusStyle,
+        cardDensityStyle = uiState.cardDensityStyle,
+        borderContrastStyle = uiState.borderContrastStyle
     ) {
         val palette = LocalSafeAreaPalette.current
         val showBottomNav = uiState.currentScreen in listOf(
@@ -225,7 +228,8 @@ fun SafeAreaApp(
                             onQuickScan = { viewModel.navigateTo(SafeAreaScreen.CAMERA_SCANNER) },
                             onOpenSettings = { viewModel.navigateTo(SafeAreaScreen.PROFILE) },
                             onLockVaultNow = { viewModel.lockVaultNow() },
-                            onConfigureSecurity = { viewModel.navigateTo(SafeAreaScreen.SECURITY_SETUP) }
+                            onConfigureSecurity = { viewModel.navigateTo(SafeAreaScreen.SECURITY_SETUP) },
+                            onSaveIceProfile = { viewModel.saveEmergencyIceProfile(it) }
                         )
                     }
 
@@ -248,6 +252,9 @@ fun SafeAreaApp(
                             onBulkDeleteSelected = { viewModel.bulkDeleteSelectedDocuments() },
                             onBulkArchiveSelected = { viewModel.bulkArchiveSelectedDocuments(it) },
                             onBulkMoveCategorySelected = { viewModel.bulkMoveCategorySelectedDocuments(it) },
+                            onCompilePdfPacketSelected = { title ->
+                                viewModel.compileAndShareDocumentPacketPdf(context, title, uiState.selectedBulkDocIds)
+                            },
                             onAddCustomCategory = { viewModel.addCustomCategory(it) },
                             onOpenDocument = { viewModel.openDocumentDetails(it) },
                             onAddDocument = { viewModel.navigateTo(SafeAreaScreen.ADD_DOCUMENT) }
@@ -342,7 +349,13 @@ fun SafeAreaApp(
                                 viewModel.copyTextToClipboard(label, text)
                             },
                             onClearCache = { viewModel.clearTemporaryCache() },
-                            onExportBackup = { viewModel.exportEncryptedVaultBackup(context) }
+                            onExportBackup = { viewModel.exportEncryptedVaultBackup(context) },
+                            onExportInFormat = { fmt -> viewModel.shareVaultExportInFormat(context, fmt) },
+                            onSaveExportToUri = { fmt, uri -> viewModel.saveVaultExportToUri(context, fmt, uri) },
+                            onCompilePacketPdf = { title, ids ->
+                                viewModel.compileAndShareDocumentPacketPdf(context, title, ids)
+                            },
+                            onSaveEmergencyIceProfile = { viewModel.saveEmergencyIceProfile(it) }
                         )
                     }
 
@@ -354,6 +367,15 @@ fun SafeAreaApp(
                             onSelectAppearanceMode = { viewModel.setAppearanceMode(it) },
                             onToggleUseSystemFont = { viewModel.setUseSystemFont(it) },
                             onSelectFontScale = { viewModel.setFontScale(it) },
+                            onSetCornerRadiusStyle = { viewModel.setCornerRadiusStyle(it) },
+                            onSetCardDensityStyle = { viewModel.setCardDensityStyle(it) },
+                            onSetBorderContrastStyle = { viewModel.setBorderContrastStyle(it) },
+                            onSetCustomVaultBranding = { title, tagline ->
+                                viewModel.updateCustomVaultBranding(title, tagline)
+                            },
+                            onSetShowSecurityScoreCard = { viewModel.setShowSecurityScoreCard(it) },
+                            onSetShowCategoryGridOnHome = { viewModel.setShowCategoryGridOnHome(it) },
+                            onAddCustomCategory = { viewModel.addCustomCategory(it) },
                             onPermissionsUpdated = { viewModel.onPermissionsResult(it) },
                             onFolderAccessGranted = { viewModel.setGrantedFolderUri(it) },
                             onToggleAppLock = { viewModel.setAppLockEnabled(it) },
@@ -365,6 +387,8 @@ fun SafeAreaApp(
                             onToggleExpiryNotifications = { viewModel.setExpiryNotificationsEnabled(it) },
                             onClearCache = { viewModel.clearTemporaryCache() },
                             onExportBackup = { viewModel.exportEncryptedVaultBackup(context) },
+                            onExportInFormat = { fmt -> viewModel.shareVaultExportInFormat(context, fmt) },
+                            onSaveExportToUri = { fmt, uri -> viewModel.saveVaultExportToUri(context, fmt, uri) },
                             onWipeAllData = { viewModel.wipeAllVaultData() }
                         )
                     }

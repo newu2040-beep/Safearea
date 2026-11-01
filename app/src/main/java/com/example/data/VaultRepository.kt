@@ -5,6 +5,10 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Matrix
+import android.graphics.Paint
+import android.graphics.RectF
+import android.graphics.Typeface
+import android.graphics.pdf.PdfDocument
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.ParcelFileDescriptor
@@ -21,6 +25,7 @@ import org.xmlpull.v1.XmlPullParserFactory
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.FileOutputStream
 import java.io.StringReader
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -209,11 +214,7 @@ class VaultRepository(
         }
 
     /**
-     * Universal file importer via Android Storage Access Framework / Photo Picker.
-     * Supports PDF, Word (.doc/.docx), Excel (.xls/.xlsx), PowerPoint (.ppt/.pptx),
-     * Images (.jpg/.jpeg/.png/.webp/.heic/.heif/.bmp/.tiff), Text (.txt/.rtf/.md),
-     * OpenDocument (.odt/.ods/.odp), CSV (.csv), JSON (.json), and XML (.xml).
-     * Preserves original file byte-for-byte encrypted with Android Keystore AES-256-GCM.
+     * Universal file importer via Android Storage Access Framework / Photo Picker / Native Camera output.
      */
     suspend fun importUriToEncryptedVault(
         uri: Uri,
@@ -305,7 +306,7 @@ class VaultRepository(
     }
 
     /**
-     * Automatically detects file types & filename keywords to suggest the best Category and Subtype.
+     * Automatically detects file types & filename keywords to suggest the best Category and Subtype across all 15 groups.
      */
     fun suggestCategoryAndSubtype(
         fileName: String,
@@ -326,27 +327,29 @@ class VaultRepository(
             lower.contains("degree") || lower.contains("university") -> DocumentCategoryGroup.EDUCATION.title to "University Degrees"
             lower.contains("transcript") || lower.contains("mark") -> DocumentCategoryGroup.EDUCATION.title to "Transcripts"
             lower.contains("diploma") || lower.contains("certificate") || lower.contains("school") || lower.contains("college") -> DocumentCategoryGroup.EDUCATION.title to "Academic Certificates"
+            lower.contains("tax") || lower.contains("pan") || lower.contains("vat") || lower.contains("gst") || lower.contains("audit") -> DocumentCategoryGroup.TAX_ACCOUNTING.title to "Income Tax Returns"
+            lower.contains("insur") || lower.contains("policy") -> DocumentCategoryGroup.INSURANCE.title to "Health / Medical Insurance"
             lower.contains("bank") || lower.contains("statement") -> DocumentCategoryGroup.FINANCIAL.title to "Bank Statements"
-            lower.contains("tax") || lower.contains("pan") -> DocumentCategoryGroup.FINANCIAL.title to "Tax Documents"
             lower.contains("invoice") -> DocumentCategoryGroup.FINANCIAL.title to "Invoices"
             lower.contains("receipt") -> DocumentCategoryGroup.FINANCIAL.title to "Receipts"
             lower.contains("medical") || lower.contains("lab") || lower.contains("prescription") || lower.contains("vaccin") -> DocumentCategoryGroup.MEDICAL.title to "Medical Reports"
             lower.contains("resume") || lower.contains("cv") -> DocumentCategoryGroup.EMPLOYMENT.title to "CV / Resume"
             lower.contains("salary") || lower.contains("payslip") -> DocumentCategoryGroup.EMPLOYMENT.title to "Salary Slips"
             lower.contains("appointment") || lower.contains("experience") -> DocumentCategoryGroup.EMPLOYMENT.title to "Experience Letters"
+            lower.contains("company") || lower.contains("incorporat") || lower.contains("trade") -> DocumentCategoryGroup.BUSINESS.title to "Company Registration Certificate"
+            lower.contains("lalpurja") || lower.contains("deed") || lower.contains("tenancy") || lower.contains("lease") -> DocumentCategoryGroup.PROPERTY.title to "Land Ownership Deed (Lalpurja)"
             lower.contains("property") || lower.contains("land") || lower.contains("rental") || lower.contains("affidavit") || lower.contains("agreement") || lower.contains("contract") -> DocumentCategoryGroup.LEGAL.title to "Agreements"
             lower.contains("flight") || lower.contains("boarding") || lower.contains("ticket") -> DocumentCategoryGroup.TRAVEL.title to "Flight Tickets"
             lower.contains("visa") || lower.contains("itinerary") || lower.contains("hotel") -> DocumentCategoryGroup.TRAVEL.title to "Visa Documents"
+            lower.contains("warranty") || lower.contains("electric") || lower.contains("water") || lower.contains("internet") -> DocumentCategoryGroup.HOME_UTILITIES.title to "Appliance Warranty Cards"
+            lower.contains("software") || lower.contains("member") || lower.contains("loyalty") -> DocumentCategoryGroup.DIGITAL_LICENSES.title to "Software Licence Keys"
             ext in listOf("xls", "xlsx", "ods", "csv") -> DocumentCategoryGroup.FINANCIAL.title to "Bank Statements"
-            ext in listOf("ppt", "pptx", "odp") -> DocumentCategoryGroup.EMPLOYMENT.title to "Business Documents"
+            ext in listOf("ppt", "pptx", "odp") -> DocumentCategoryGroup.BUSINESS.title to "Company Registration Certificate"
             ext in listOf("doc", "docx", "odt", "rtf") -> DocumentCategoryGroup.LEGAL.title to "Agreements"
             else -> DocumentCategoryGroup.PERSONAL.title to "Personal Identification Documents"
         }
     }
 
-    /**
-     * Extracts real metadata and text key-value pairs from the imported file without any fake placeholders.
-     */
     private fun extractRealMetadataFields(
         fileName: String,
         ext: String,
@@ -458,15 +461,6 @@ class VaultRepository(
         return result
     }
 
-    /**
-     * Reads and renders human-readable text preview for Universal File Formats:
-     * - Plain text (.txt, .md, .rtf)
-     * - CSV (.csv) formatted as readable rows
-     * - JSON (.json) pretty-printed
-     * - XML (.xml) formatted
-     * - Office OpenXML (.docx, .xlsx, .pptx) & OpenDocument (.odt, .ods, .odp) by parsing their internal XML entries
-     * - Legacy binary Office (.doc, .xls, .ppt) by extracting printable ASCII/UTF-8 runs
-     */
     suspend fun readDocumentTextPreview(doc: DocumentEntity): String? = withContext(Dispatchers.IO) {
         if (doc.frontFileRef.isBlank()) return@withContext null
         val bytes = cryptoStorage.readDecryptedFile(doc.frontFileRef) ?: return@withContext null
@@ -707,16 +701,433 @@ class VaultRepository(
             }
         }
 
-    suspend fun exportVaultBackupJson(): File = withContext(Dispatchers.IO) {
-        val docs = dao.getAllDocumentsOnce().filter { !it.isSamplePlaceholder }
+    // --- Multi-Format Vault Data Exporter (PDF, CSV, TXT, Markdown, HTML, JSON, XML) ---
+
+    suspend fun exportVaultData(
+        format: ExportFormat,
+        selectedDocs: List<DocumentWithFields>? = null
+    ): File = withContext(Dispatchers.IO) {
+        val docsWithFields = selectedDocs ?: run {
+            val allDocs = dao.getAllDocumentsOnce().filter { !it.isSamplePlaceholder }
+            allDocs.map { doc ->
+                DocumentWithFields(
+                    document = doc,
+                    fields = dao.getFieldsForDocument(doc.id)
+                )
+            }
+        }
+
+        val outDir = cryptoStorage.exportCacheDir
+        val outFile = File(outDir, "safearea_vault_export.${format.extension}")
+        val exportedAtIso = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())
+
+        when (format) {
+            ExportFormat.PDF -> {
+                generatePdfReport(
+                    outputFile = outFile,
+                    reportTitle = "${cryptoStorage.customVaultTitle} — Vault Report",
+                    exportedAt = exportedAtIso,
+                    docs = docsWithFields,
+                    embedImages = false
+                )
+            }
+            ExportFormat.CSV -> {
+                outFile.writeText(buildCsvExport(docsWithFields), Charsets.UTF_8)
+            }
+            ExportFormat.TXT -> {
+                outFile.writeText(buildTxtExport(exportedAtIso, docsWithFields), Charsets.UTF_8)
+            }
+            ExportFormat.MARKDOWN -> {
+                outFile.writeText(buildMarkdownExport(exportedAtIso, docsWithFields), Charsets.UTF_8)
+            }
+            ExportFormat.HTML -> {
+                outFile.writeText(buildHtmlExport(exportedAtIso, docsWithFields), Charsets.UTF_8)
+            }
+            ExportFormat.JSON -> {
+                outFile.writeText(buildJsonExport(exportedAtIso, docsWithFields), Charsets.UTF_8)
+            }
+            ExportFormat.XML -> {
+                outFile.writeText(buildXmlExport(exportedAtIso, docsWithFields), Charsets.UTF_8)
+            }
+        }
+
+        logAudit("DATA_EXPORTED", "Exported ${docsWithFields.size} document(s) as ${format.badge}")
+        outFile
+    }
+
+    /**
+     * Unique Feature: Smart PDF Packet / Dossier Compiler.
+     * Merges selected documents and their decrypted images + metadata into a multi-page PDF packet.
+     */
+    suspend fun compileDocumentsPacketPdf(
+        packetTitle: String,
+        selectedDocs: List<DocumentWithFields>
+    ): File = withContext(Dispatchers.IO) {
+        val outDir = cryptoStorage.exportCacheDir
+        val cleanSlug = packetTitle.lowercase(Locale.ROOT)
+            .replace(Regex("[^a-z0-9]+"), "_")
+            .trim('_')
+            .ifBlank { "dossier" }
+        val outFile = File(outDir, "safearea_${cleanSlug}_packet.pdf")
+        val exportedAtIso = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())
+
+        generatePdfReport(
+            outputFile = outFile,
+            reportTitle = packetTitle.ifBlank { "SAFEAREA Document Packet" },
+            exportedAt = exportedAtIso,
+            docs = selectedDocs,
+            embedImages = true
+        )
+        logAudit("PDF_PACKET_COMPILED", "Compiled PDF packet \"$packetTitle\" (${selectedDocs.size} docs)")
+        outFile
+    }
+
+    private fun generatePdfReport(
+        outputFile: File,
+        reportTitle: String,
+        exportedAt: String,
+        docs: List<DocumentWithFields>,
+        embedImages: Boolean
+    ) {
+        val wroteViaNativePdf = runCatching {
+            val pdf = PdfDocument()
+            val pageWidth = 595 // A4 width in points (72 dpi)
+            val pageHeight = 842 // A4 height in points
+
+            val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(23, 20, 49)
+                textSize = 18f
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            }
+            val subtitlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(90, 90, 110)
+                textSize = 10f
+            }
+            val sectionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(213, 16, 75)
+                textSize = 13f
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            }
+            val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(40, 40, 60)
+                textSize = 10.5f
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            }
+            val bodyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(30, 30, 45)
+                textSize = 10.5f
+            }
+            val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(210, 210, 220)
+                strokeWidth = 1f
+            }
+            try {
+                var pageNumber = 1
+                var currentPage = pdf.startPage(PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNumber).create())
+                var canvas = currentPage.canvas
+                var y = 48f
+
+                fun startNewPage() {
+                    pdf.finishPage(currentPage)
+                    pageNumber++
+                    currentPage = pdf.startPage(PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNumber).create())
+                    canvas = currentPage.canvas
+                    y = 48f
+                }
+
+                // Header banner
+                canvas.drawText(reportTitle, 40f, y, titlePaint)
+                y += 18f
+                canvas.drawText(
+                    "Generated by SAFEAREA on $exportedAt · Total Documents: ${docs.size}",
+                    40f,
+                    y,
+                    subtitlePaint
+                )
+                y += 14f
+                canvas.drawLine(40f, y, (pageWidth - 40).toFloat(), y, linePaint)
+                y += 22f
+
+                if (docs.isEmpty()) {
+                    canvas.drawText("No documents in vault.", 40f, y, bodyPaint)
+                } else {
+                    docs.forEachIndexed { index, item ->
+                        val doc = item.document
+                        if (y > pageHeight - 140) {
+                            startNewPage()
+                        }
+
+                        canvas.drawText("${index + 1}. ${doc.title}", 40f, y, sectionPaint)
+                        y += 16f
+
+                        val metaLine = buildString {
+                            append("Category: ${doc.category}")
+                            if (doc.documentSubtype.isNotBlank()) append(" (${doc.documentSubtype})")
+                            if (doc.displayFormatBadge.isNotBlank()) append("  |  Format: ${doc.displayFormatBadge}")
+                        }
+                        canvas.drawText(metaLine.take(95), 48f, y, labelPaint)
+                        y += 14f
+
+                        if (doc.issuer.isNotBlank() || doc.country.isNotBlank()) {
+                            val issuerLine = "Issuer: ${doc.issuer.ifBlank { "-" }}  |  Country: ${doc.country.ifBlank { "-" }}"
+                            canvas.drawText(issuerLine.take(95), 48f, y, bodyPaint)
+                            y += 14f
+                        }
+
+                        if (doc.issueDate.isNotBlank() || doc.expiryDate.isNotBlank()) {
+                            val datesLine = "Issue Date: ${doc.issueDate.ifBlank { "-" }}  |  Expiry Date: ${doc.expiryDate.ifBlank { "None" }}"
+                            canvas.drawText(datesLine.take(95), 48f, y, bodyPaint)
+                            y += 14f
+                        }
+
+                        item.fields.forEach { field ->
+                            if (y > pageHeight - 60) startNewPage()
+                            val rowText = "• ${field.label}: ${field.value}"
+                            canvas.drawText(rowText.take(100), 56f, y, bodyPaint)
+                            y += 14f
+                        }
+
+                        if (doc.notes.isNotBlank()) {
+                            if (y > pageHeight - 60) startNewPage()
+                            canvas.drawText("Notes: ${doc.notes.replace("\n", " ").take(95)}", 48f, y, subtitlePaint)
+                            y += 14f
+                        }
+
+                        if (embedImages && doc.frontFileRef.isNotBlank() && doc.mimeType.startsWith("image/")) {
+                            val imgBytes = cryptoStorage.readDecryptedFile(doc.frontFileRef)
+                            val bmp = imgBytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+                            if (bmp != null) {
+                                if (y > pageHeight - 230) startNewPage()
+                                val maxW = (pageWidth - 96).toFloat()
+                                val maxH = 190f
+                                val scale = minOf(maxW / bmp.width.toFloat(), maxH / bmp.height.toFloat(), 1f)
+                                val drawW = bmp.width * scale
+                                val drawH = bmp.height * scale
+                                val destRect = RectF(48f, y + 4f, 48f + drawW, y + 4f + drawH)
+                                canvas.drawBitmap(bmp, null, destRect, null)
+                                y += drawH + 16f
+                            }
+                        }
+
+                        y += 6f
+                        canvas.drawLine(40f, y, (pageWidth - 40).toFloat(), y, linePaint)
+                        y += 18f
+                    }
+                }
+
+                pdf.finishPage(currentPage)
+                FileOutputStream(outputFile).use { fos ->
+                    pdf.writeTo(fos)
+                }
+            } finally {
+                runCatching { pdf.close() }
+            }
+            outputFile.exists() && outputFile.length() > 0L
+        }.getOrDefault(false)
+
+        if (!wroteViaNativePdf) {
+            writeStandardPdf14Fallback(outputFile, reportTitle, exportedAt, docs)
+        }
+    }
+
+    private fun writeStandardPdf14Fallback(
+        outputFile: File,
+        reportTitle: String,
+        exportedAt: String,
+        docs: List<DocumentWithFields>
+    ) {
+        fun escPdf(s: String): String =
+            s.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+        val lines = mutableListOf<String>()
+        lines.add(reportTitle)
+        lines.add("Generated by SAFEAREA on $exportedAt | Documents: ${docs.size}")
+        lines.add("----------------------------------------------------------------------")
+        docs.forEachIndexed { idx, item ->
+            val d = item.document
+            lines.add("${idx + 1}. ${d.title} [${d.category}]")
+            if (d.documentSubtype.isNotBlank() || d.issuer.isNotBlank()) {
+                lines.add("   Subtype: ${d.documentSubtype.ifBlank { "-" }} | Issuer: ${d.issuer.ifBlank { "-" }}")
+            }
+            if (d.issueDate.isNotBlank() || d.expiryDate.isNotBlank()) {
+                lines.add("   Issue: ${d.issueDate.ifBlank { "-" }} | Expiry: ${d.expiryDate.ifBlank { "None" }}")
+            }
+            item.fields.forEach { f ->
+                lines.add("   - ${f.label}: ${f.value}")
+            }
+            lines.add("")
+        }
+
+        val contentStream = buildString {
+            appendLine("BT")
+            appendLine("/F1 11 Tf")
+            appendLine("42 790 Td")
+            appendLine("14 TL")
+            lines.take(50).forEach { line ->
+                appendLine("(${escPdf(line.take(95))}) Tj T*")
+            }
+            appendLine("ET")
+        }
+
+        val pdfText = buildString {
+            appendLine("%PDF-1.4")
+            appendLine("1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj")
+            appendLine("2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj")
+            appendLine("3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj")
+            appendLine("4 0 obj << /Length ${contentStream.toByteArray(Charsets.ISO_8859_1).size} >>")
+            appendLine("stream")
+            append(contentStream)
+            appendLine("endstream")
+            appendLine("endobj")
+            appendLine("5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj")
+            appendLine("trailer << /Root 1 0 R >>")
+            appendLine("%%EOF")
+        }
+        outputFile.writeBytes(pdfText.toByteArray(Charsets.ISO_8859_1))
+    }
+
+    private fun buildCsvExport(docs: List<DocumentWithFields>): String {
+        fun esc(raw: String): String {
+            val clean = raw.replace("\"", "\"\"").replace("\n", " ").replace("\r", " ")
+            return "\"$clean\""
+        }
+        val sb = StringBuilder()
+        sb.appendLine("ID,Title,Category,Subtype,Issuer,Country,IssueDate,ExpiryDate,Format,FileSizeBytes,Favourite,Archived,Tags,StructuredFields,Notes")
+        docs.forEach { item ->
+            val d = item.document
+            val joinedFields = item.fields.joinToString("; ") { "${it.label}: ${it.value}" }
+            sb.appendLine(
+                listOf(
+                    d.id.toString(),
+                    esc(d.title),
+                    esc(d.category),
+                    esc(d.documentSubtype),
+                    esc(d.issuer),
+                    esc(d.country),
+                    esc(d.issueDate),
+                    esc(d.expiryDate),
+                    esc(d.displayFormatBadge),
+                    d.fileSize.toString(),
+                    d.favourite.toString(),
+                    d.archived.toString(),
+                    esc(d.tagsCsv),
+                    esc(joinedFields),
+                    esc(d.notes)
+                ).joinToString(",")
+            )
+        }
+        return sb.toString()
+    }
+
+    private fun buildTxtExport(exportedAt: String, docs: List<DocumentWithFields>): String {
+        val sb = StringBuilder()
+        sb.appendLine("==================================================")
+        sb.appendLine("${cryptoStorage.customVaultTitle} - PERSONAL DOCUMENT VAULT EXPORT")
+        sb.appendLine("Exported At: $exportedAt")
+        sb.appendLine("Total Documents: ${docs.size}")
+        sb.appendLine("==================================================")
+        sb.appendLine()
+        docs.forEachIndexed { idx, item ->
+            val d = item.document
+            sb.appendLine("[${idx + 1}] ${d.title}")
+            sb.appendLine("    Category: ${d.category}${if (d.documentSubtype.isNotBlank()) " / ${d.documentSubtype}" else ""}")
+            if (d.issuer.isNotBlank()) sb.appendLine("    Issuer: ${d.issuer}")
+            if (d.country.isNotBlank()) sb.appendLine("    Country: ${d.country}")
+            if (d.issueDate.isNotBlank()) sb.appendLine("    Issue Date: ${d.issueDate}")
+            if (d.expiryDate.isNotBlank()) sb.appendLine("    Expiry Date: ${d.expiryDate}")
+            sb.appendLine("    Format: ${d.displayFormatBadge} (${d.fileSize} bytes)")
+            if (item.fields.isNotEmpty()) {
+                sb.appendLine("    Fields:")
+                item.fields.forEach { f ->
+                    sb.appendLine("      - ${f.label}: ${f.value}")
+                }
+            }
+            if (d.notes.isNotBlank()) {
+                sb.appendLine("    Notes: ${d.notes}")
+            }
+            sb.appendLine("--------------------------------------------------")
+        }
+        return sb.toString()
+    }
+
+    private fun buildMarkdownExport(exportedAt: String, docs: List<DocumentWithFields>): String {
+        val sb = StringBuilder()
+        sb.appendLine("# ${cryptoStorage.customVaultTitle} — Vault Export")
+        sb.appendLine()
+        sb.appendLine("- **Exported At:** $exportedAt")
+        sb.appendLine("- **Total Documents:** ${docs.size}")
+        sb.appendLine()
+        sb.appendLine("## Summary Table")
+        sb.appendLine()
+        sb.appendLine("| # | Title | Category | Subtype | Expiry Date | Format |")
+        sb.appendLine("|---|-------|----------|---------|-------------|--------|")
+        docs.forEachIndexed { idx, item ->
+            val d = item.document
+            sb.appendLine("| ${idx + 1} | ${d.title} | ${d.category} | ${d.documentSubtype.ifBlank { "-" }} | ${d.expiryDate.ifBlank { "-" }} | ${d.displayFormatBadge} |")
+        }
+        sb.appendLine()
+        sb.appendLine("## Detailed Records")
+        sb.appendLine()
+        docs.forEachIndexed { idx, item ->
+            val d = item.document
+            sb.appendLine("### ${idx + 1}. ${d.title}")
+            sb.appendLine("- **Category:** ${d.category} (${d.documentSubtype.ifBlank { "General" }})")
+            if (d.issuer.isNotBlank()) sb.appendLine("- **Issuer:** ${d.issuer}")
+            if (d.country.isNotBlank()) sb.appendLine("- **Country:** ${d.country}")
+            if (d.issueDate.isNotBlank()) sb.appendLine("- **Issue Date:** ${d.issueDate}")
+            if (d.expiryDate.isNotBlank()) sb.appendLine("- **Expiry Date:** ${d.expiryDate}")
+            item.fields.forEach { f ->
+                sb.appendLine("- **${f.label}:** `${f.value}`")
+            }
+            if (d.notes.isNotBlank()) sb.appendLine("- **Notes:** ${d.notes}")
+            sb.appendLine()
+        }
+        return sb.toString()
+    }
+
+    private fun buildHtmlExport(exportedAt: String, docs: List<DocumentWithFields>): String {
+        fun htmlEsc(s: String): String = s
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace("\"", "&quot;")
+
+        val sb = StringBuilder()
+        sb.appendLine("<!DOCTYPE html><html><head><meta charset=\"UTF-8\">")
+        sb.appendLine("<title>${htmlEsc(cryptoStorage.customVaultTitle)} Vault Export</title>")
+        sb.appendLine("<style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#F1EADB;color:#171431;padding:24px;max-width:860px;margin:auto;} .card{background:#FFFDF7;border:1px solid #d0c8b8;border-radius:16px;padding:16px;margin-bottom:14px;} h1{margin-bottom:4px;} .meta{color:#5a5770;font-size:13px;margin-bottom:10px;} .field{font-size:14px;margin:4px 0;} .badge{display:inline-block;background:#DCECE2;color:#171431;padding:2px 8px;border-radius:6px;font-size:12px;font-weight:bold;}</style>")
+        sb.appendLine("</head><body>")
+        sb.appendLine("<h1>${htmlEsc(cryptoStorage.customVaultTitle)} — Document Vault Report</h1>")
+        sb.appendLine("<p class=\"meta\">Exported on ${htmlEsc(exportedAt)} &middot; ${docs.size} document(s)</p>")
+        docs.forEachIndexed { idx, item ->
+            val d = item.document
+            sb.appendLine("<div class=\"card\">")
+            sb.appendLine("<h3>${idx + 1}. ${htmlEsc(d.title)} <span class=\"badge\">${htmlEsc(d.displayFormatBadge)}</span></h3>")
+            sb.appendLine("<div class=\"meta\">Category: ${htmlEsc(d.category)} &middot; Subtype: ${htmlEsc(d.documentSubtype.ifBlank { "-" })} &middot; Expiry: ${htmlEsc(d.expiryDate.ifBlank { "None" })}</div>")
+            item.fields.forEach { f ->
+                sb.appendLine("<div class=\"field\"><strong>${htmlEsc(f.label)}:</strong> ${htmlEsc(f.value)}</div>")
+            }
+            if (d.notes.isNotBlank()) {
+                sb.appendLine("<div class=\"field\"><em>Notes: ${htmlEsc(d.notes)}</em></div>")
+            }
+            sb.appendLine("</div>")
+        }
+        sb.appendLine("</body></html>")
+        return sb.toString()
+    }
+
+    private fun buildJsonExport(exportedAt: String, docs: List<DocumentWithFields>): String {
         val root = JSONObject()
         root.put("app", "SAFEAREA")
-        root.put("version", 2)
-        root.put("exportedAt", SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ", Locale.US).format(Date()))
+        root.put("vaultTitle", cryptoStorage.customVaultTitle)
+        root.put("version", 3)
+        root.put("exportedAt", exportedAt)
         val docsArray = JSONArray()
-        for (doc in docs) {
-            val fields = dao.getFieldsForDocument(doc.id)
+        for (item in docs) {
+            val doc = item.document
+            val fields = item.fields
             val docObj = JSONObject().apply {
+                put("id", doc.id)
                 put("title", doc.title)
                 put("category", doc.category)
                 put("documentSubtype", doc.documentSubtype)
@@ -750,13 +1161,44 @@ class VaultRepository(
             docsArray.put(docObj)
         }
         root.put("documents", docsArray)
-
-        val outDir = File(context.cacheDir, "exports").apply { if (!exists()) mkdirs() }
-        val backupFile = File(outDir, "safearea_vault_backup.json")
-        backupFile.writeText(root.toString(2))
-        logAudit("BACKUP_EXPORTED", "Exported ${docs.size} documents metadata backup")
-        backupFile
+        return root.toString(2)
     }
+
+    private fun buildXmlExport(exportedAt: String, docs: List<DocumentWithFields>): String {
+        fun xmlEsc(s: String): String = s
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace("\"", "&quot;")
+            .replace("'", "&apos;")
+
+        val sb = StringBuilder()
+        sb.appendLine("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
+        sb.appendLine("<SafeAreaVault exportedAt=\"${xmlEsc(exportedAt)}\" count=\"${docs.size}\">")
+        docs.forEach { item ->
+            val d = item.document
+            sb.appendLine("  <Document id=\"${d.id}\" format=\"${xmlEsc(d.displayFormatBadge)}\" favourite=\"${d.favourite}\" archived=\"${d.archived}\">")
+            sb.appendLine("    <Title>${xmlEsc(d.title)}</Title>")
+            sb.appendLine("    <Category>${xmlEsc(d.category)}</Category>")
+            sb.appendLine("    <Subtype>${xmlEsc(d.documentSubtype)}</Subtype>")
+            sb.appendLine("    <Issuer>${xmlEsc(d.issuer)}</Issuer>")
+            sb.appendLine("    <Country>${xmlEsc(d.country)}</Country>")
+            sb.appendLine("    <IssueDate>${xmlEsc(d.issueDate)}</IssueDate>")
+            sb.appendLine("    <ExpiryDate>${xmlEsc(d.expiryDate)}</ExpiryDate>")
+            sb.appendLine("    <Tags>${xmlEsc(d.tagsCsv)}</Tags>")
+            sb.appendLine("    <Notes>${xmlEsc(d.notes)}</Notes>")
+            sb.appendLine("    <Fields>")
+            item.fields.forEach { f ->
+                sb.appendLine("      <Field label=\"${xmlEsc(f.label)}\" sensitive=\"${f.isSensitive}\">${xmlEsc(f.value)}</Field>")
+            }
+            sb.appendLine("    </Fields>")
+            sb.appendLine("  </Document>")
+        }
+        sb.appendLine("</SafeAreaVault>")
+        return sb.toString()
+    }
+
+    suspend fun exportVaultBackupJson(): File = exportVaultData(ExportFormat.JSON)
 
     suspend fun wipeAllData() = withContext(Dispatchers.IO) {
         dao.deleteAllFields()
